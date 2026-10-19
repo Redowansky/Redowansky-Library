@@ -1,0 +1,75 @@
+# sia-lab admin-auth fixes — prepared 2026-10-19 ~13:35 +06, NOT yet applied or deployed.
+# The main agent is mid-thread with Redowan in the side chat about the TMDB key /
+# admin password being wiped on every update. Apply on the next deploy (he is
+# about to pick a permanent password; the deploy that locks it in should carry this).
+#
+# DIAGNOSIS
+# 1) Every deploy wipes ALL Durable Object storage. worker.js:1109 calls
+#    env.TUNNEL_DO.idFromName("main-v28") and the name is bumped on every deploy
+#    (main-v2 -> ... -> main-v17 -> ... -> main-v28). idFromName() maps each
+#    unique name to a FRESH, EMPTY Durable Object, so each deploy orphans:
+#      admin_pw, tmdb_key, meta:* (all movie posters/info), ext:* (all external links)
+#    This is the entire "password/TMDB key reset on every update" saga, and it
+#    also silently deletes his movie metadata + external links each time.
+#    FIX: freeze the name (comment added below). The deployed DO right now IS
+#    "main-v28" (deployed 2026-10-19 ~07:23 UTC), so freezing keeps everything
+#    he set today (TMDB key at ~13:26 local, external links, metadata).
+#    Worker secrets are NOT needed for the key/password once the name is frozen.
+# 2) /api/admin/upload (PUT) and /api/admin/buckets (POST/DELETE) compare the
+#    password against env.ADMIN_PW directly — but deploy_worker.py sets NO
+#    secrets/vars, so env.ADMIN_PW is undefined and these endpoints ALWAYS 403,
+#    for any password. Admin file uploads and shelf add/delete are broken right
+#    now (independent of the wipe issue). The 2.83 GB MKV failure was diagnosed
+#    as the 100 MB Cloudflare cap, but every admin upload also hits this 403.
+#    FIX: use the checkPw() helper like every other admin endpoint does.
+#
+# HOW TO APPLY: cd ~/workspace/sia-lab && patch -p1 < fix-admin-auth.patch
+# then deploy with deploy_worker.py as usual. No DO migration needed.
+# Optional later cleanup: rename the DO to a stable "main" with a one-time
+# copy of storage from "main-v28" — only cosmetic, do NOT do it casually.
+
+--- a/worker.js
++++ b/worker.js
+@@ -768,8 +768,7 @@
+         return new Response(PAGE, { headers: { "content-type": "text/html;charset=utf-8" } });
+       if (path === "/admin" || path === "/admin.html")
+         return new Response(ADMIN_PAGE, { headers: { "content-type": "text/html;charset=utf-8" } });
+       if (path === "/api/admin/upload" && request.method === "PUT") {
+-        const pw = url.searchParams.get("pw");
+-        if (pw !== env.ADMIN_PW) return json({ error: "wrong password" }, 403);
++        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+         const bucket = url.searchParams.get("bucket"), key = url.searchParams.get("key");
+         if (!bucket || !key) return json({ error: "missing bucket/key" }, 400);
+         const ct = request.headers.get("content-type") || "application/octet-stream";
+@@ -779,8 +778,7 @@
+         return json({ ok: true });
+       }
+       if (path === "/api/admin/buckets" && request.method === "POST") {
+-        const pw = url.searchParams.get("pw");
+-        if (pw !== env.ADMIN_PW) return json({ error: "wrong password" }, 403);
++        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+         const { name } = await request.json();
+         if (!/^[a-z0-9-]{3,63}$/.test(name || "")) return json({ error: "bad shelf name (a-z, 0-9, -)" }, 400);
+         const r = await this.s3fetch("PUT", "/" + name);
+@@ -788,8 +786,7 @@
+         return json({ ok: true });
+       }
+       if (path === "/api/admin/buckets" && request.method === "DELETE") {
+-        const pw = url.searchParams.get("pw");
+-        if (pw !== env.ADMIN_PW) return json({ error: "wrong password" }, 403);
++        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+         const name = url.searchParams.get("name");
+         if (!name) return json({ error: "missing name" }, 400);
+         // delete all objects first, then the bucket
+@@ -1106,7 +1103,10 @@
+ 
+ export default {
+   async fetch(req, env) {
+-    const stub = env.TUNNEL_DO.get(env.TUNNEL_DO.idFromName("main-v28"));
++    // DO NOT rename this string. idFromName() maps each unique name to a FRESH,
++    // EMPTY Durable Object — renaming wipes admin_pw, tmdb_key, meta:* and ext:*
++    // on every deploy. Freeze it; all settings then survive updates.
++    const stub = env.TUNNEL_DO.get(env.TUNNEL_DO.idFromName("main-v28"));
+     return stub.fetch(req);
+   },
+ };
