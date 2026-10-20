@@ -75,9 +75,9 @@ const json = (obj, status = 200) =>
 const bufToText = (buf) => new TextDecoder().decode(buf);
 
 // ---- PAGE (public read-only library) ----
-const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1642095506798662" crossorigin="anonymous"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Redowansky's Library — Movies & Shows</title>
+<title>Redowansky's Library — Movies & Songs</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--grn:#00e676;--bg:#060906}
@@ -150,7 +150,7 @@ section.row{padding:0 12px}
 }
 </style></head><body>
 <header id="hdr"><div class="logo" onclick="location.href='/'">🎬 Redowansky</div>
-<nav><a class="on" data-f="all">Home</a><a data-f="movie">Movies</a><a data-f="tv">TV Shows</a></nav>
+<nav><a class="on" data-f="movie">Movies</a><a data-f="song">Video Songs</a></nav>
 <div class="search"><input id="q" placeholder="Search titles..." oninput="doSearch(this.value)"></div></header>
 <div class="hero" id="hero" style="display:none"><div class="hero-bg" id="hbg"></div><div class="hero-grad"></div>
 <div class="hero-info"><h1 id="ht"></h1><div class="hero-meta" id="hm"></div><p id="ho"></p>
@@ -170,7 +170,7 @@ async function load(){
     const d=await (await fetch('/api/movies')).json();
     ALL=d.movies||[];
     if(!ALL.length){$('main').innerHTML='<div class="empty">No movies yet.</div>';setStatus('empty');return;}
-    render('all','');
+    render('movie','');
     const feat=[...ALL].filter(m=>m.backdrop).sort((a,b)=>(b.vote||0)-(a.vote||0))[0]||ALL[0];
     if(feat){
       $('hero').style.display='flex';
@@ -185,29 +185,30 @@ async function load(){
   }catch(e){setStatus('● offline','bad');}
 }
 function card(m){
-  const p=m.poster?'<img loading="lazy" src="'+IMG+m.poster+'" alt="">':'<div class="noposter">🎬</div>';
-  const js=JSON.stringify(m).replace(/'/g,'&#39;');
+  const p=m.poster?'<img loading="lazy" src="'+(m.poster.startsWith('http')?m.poster:IMG+m.poster)+'" alt="">':'<div class="noposter">'+(m.type==='song'?'🎵':'🎬')+'</div>';
+  const js=JSON.stringify(m).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   return '<div class="card" onclick="openModal('+js+')">'+p+'<div class="cinfo"><b>'+m.title+'</b><span>'+(m.year||'')+' '+(m.vote?'★ '+m.vote:'')+'</span></div></div>';
 }
 function render(filter,q){
   q=(q||'').toLowerCase();
+  $('hero').style.display=(filter==='song'||!$('ht').textContent)?'none':'flex';
   let list=ALL.filter(m=>(filter==='all'||m.type===filter)&&(!q||m.title.toLowerCase().includes(q)));
   const main=$('main');main.innerHTML='';
   if(!list.length){main.innerHTML='<div class="empty">Nothing found.</div>';return;}
-  const movies=list.filter(m=>m.type!=='tv'), tv=list.filter(m=>m.type==='tv');
+  const movies=list.filter(m=>m.type!=='song'), songs=list.filter(m=>m.type==='song');
   const mk=(t,arr)=>{if(!arr.length)return '';return '<section class="row"><h2>'+t+'</h2><div class="cards">'+arr.map(card).join('')+'</div></section>';};
-  if(filter==='all'){main.innerHTML=mk('🎬 Movies',movies)+mk('📺 TV Shows',tv);}
-  else main.innerHTML=mk(filter==='movie'?'🎬 Movies':'📺 TV Shows',list);
+  if(filter==='all'){main.innerHTML=mk('🎬 Movies',movies)+mk('🎵 Video Songs',songs);}
+  else main.innerHTML=mk(filter==='movie'?'🎬 Movies':'🎵 Video Songs',list);
   main.style.paddingTop=$('hero').style.display==='none'?'90px':'20px';
 }
 function doSearch(q){const f=document.querySelector('nav a.on').dataset.f;render(f,q);}
 document.querySelectorAll('nav a').forEach(a=>a.onclick=()=>{document.querySelectorAll('nav a').forEach(x=>x.classList.remove('on'));a.classList.add('on');$('q').value='';render(a.dataset.f,'');});
 function openModal(m){
-  $('mhero').style.backgroundImage=m.backdrop?'url('+BG+m.backdrop+')':'none';
+  $('mhero').style.backgroundImage=m.backdrop?'url('+BG+m.backdrop+')':(m.poster&&m.poster.startsWith('http')?'url('+m.poster+')':'none');
   var genres=(m.genres||[]).map(function(g){return '<span>'+g+'</span>';}).join('');
   var vurl=m.external?'/view/ext/'+m.id:'/view/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
   var durl=m.external?m.url:'/dl/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
-  $('minfo').innerHTML='<h2>'+m.title+'</h2><div class="mmeta"><span class="rate">★ '+(m.vote||'—')+'</span><span>'+(m.year||'')+'</span><span>'+(m.type==='tv'?'TV Series':'Movie')+'</span></div><p>'+(m.overview||'No overview available.')+'</p><div class="genres">'+genres+'</div><div class="hero-btns"><a class="btn btn-play" href="'+vurl+'">▶ Play</a><a class="btn btn-info" href="'+durl+'">⭳ Download</a></div>';
+  $('minfo').innerHTML='<h2>'+m.title+'</h2><div class="mmeta"><span class="rate">★ '+(m.vote||'—')+'</span><span>'+(m.year||'')+'</span><span>'+(m.type==='song'?'Video Song':'Movie')+'</span></div><p>'+(m.overview||'No overview available.')+'</p><div class="genres">'+genres+'</div><div class="hero-btns"><a class="btn btn-play" href="'+vurl+'">▶ Play</a><a class="btn btn-info" href="'+durl+'">⭳ Download</a></div>';
   $('modal').classList.add('open');
 }
 function closeModal(){$('modal').classList.remove('open');}
@@ -244,7 +245,7 @@ function cleanTitle(filename){
 }
 
 // ---- Admin upload page (private, password via ?pw= or prompt) ----
-const ADMIN_PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+const ADMIN_PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1642095506798662" crossorigin="anonymous"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dashboard — Redowansky's Library</title>
 <style>
@@ -311,8 +312,6 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <nav>
 <h2>◈ Library Admin</h2>
 <button data-s="dash" class="on">📊 <span>Dashboard</span></button>
-<button data-s="upload">📤 <span>Upload</span></button>
-<button data-s="files">📁 <span>Files</span></button>
 <button data-s="shelves">📦 <span>Shelves</span></button>
 <button data-s="movies">🎬 <span>Movies</span></button>
 <button data-s="settings">⚙️ <span>Settings</span></button>
@@ -338,18 +337,6 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <div class="ginfo"><div>Used: <b id="gused">…</b></div><div>Free: <b id="gfree">…</b></div><div>Total: <b id="gtotal">…</b></div></div>
 </div></div>
 <!-- UPLOAD -->
-<div class="sec" id="s-upload">
-<h1>📤 Upload</h1><p class="desc">Files go live on redowansky.bond instantly.</p>
-<label>Shelf</label><select id="upBucket"></select>
-<div id="drop">tap to choose files or drag &amp; drop<div class="prog" id="prog"><div></div></div></div>
-<input type="file" id="file" multiple style="display:none">
-<div id="ulog"></div>
-</div>
-<!-- FILES -->
-<div class="sec" id="s-files">
-<h1>📁 File Manager</h1><p class="desc">Browse files by shelf. Tap ⋮ for options.</p>
-<div id="filetree"></div>
-</div>
 <!-- SHELVES -->
 <div class="sec" id="s-shelves">
 <h1>📦 Shelves</h1><p class="desc">Organize your library into categories like movies, books, songs.</p>
@@ -358,6 +345,7 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 </div>
 <!-- MOVIES (TMDB matching) -->
 <div class="sec" id="s-movies">
+<h1>🎬 Movies & Songs</h1><p class="desc">Add movies and video songs by link. They appear on the site instantly.</p>
 <h3>🎬 Movie Info (TMDB)</h3>
 <p style="color:#7a9a85;font-size:.9rem;margin-bottom:14px">Match your video files to TMDB for posters & info. Get a free API key at <a href="https://www.themoviedb.org/settings/api" target="_blank" style="color:#00e676">themoviedb.org/settings/api</a></p>
 <div style="display:flex;gap:10px;margin-bottom:16px">
@@ -366,8 +354,8 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 </div>
 <div id="tmdbStatus" style="font-size:.85rem;margin-bottom:16px"></div>
 <div style="background:#0a120c;border:1px solid #1e3a2a;border-radius:12px;padding:14px;margin-bottom:16px">
-<h4 style="margin-bottom:10px">🔗 Add external movie link</h4>
-<p style="color:#7a9a85;font-size:.85rem;margin-bottom:10px">For big files hosted elsewhere (Google Drive, Dropbox…). Paste a direct video URL.</p>
+<h4 style="margin-bottom:10px">🔗 Add external link (movie or video song)</h4>
+<p style="color:#7a9a85;font-size:.85rem;margin-bottom:10px">For files hosted elsewhere (Pixeldrain, Google Drive, Dropbox…). Paste the link, write the title, and tick 🎵 Video song if it's a song.</p>
 <div id="extVers">
 <div class="extver" style="display:flex;gap:6px;margin-bottom:6px">
 <input class="extvlabel" placeholder="Label" value="Hindi" style="width:80px;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
@@ -381,15 +369,18 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <b style="color:#e8f5e9">Google Drive</b> — 15GB free, best for big movies. Share links auto-convert.<br>
 <b style="color:#e8f5e9">Dropbox</b> — 2GB free, share links auto-convert (?raw=1).<br>
 <b style="color:#e8f5e9">Pixeldrain</b> — free, no account, direct links work.<br>
-<b style="color:#e8f5e9">GoFile</b> — free, no account, use the direct download link.<br>
+<b style="color:#e8f5e9">GoFile</b> — free and fast uploads, but direct links need Premium, so its links do NOT play on the site.<br>
 <b style="color:#e8f5e9">MediaFire</b> — 10GB free, use the direct download link.<br>
 <span style="color:#ff9a9a">MEGA not supported</span> — its links need decryption, browsers can't stream them directly.
 </div></details>
-<div style="display:flex;gap:8px">
-<input id="extTitle" placeholder="Title to match on TMDB (e.g. Iron Man)" style="flex:1;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
-<button class="btn" onclick="addExternal()">Add</button>
+<input id="extTitle" placeholder="Title (for video songs, type the song name)" style="width:100%;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
+<input id="extCover" placeholder="Cover (optional): paste the YouTube link or an image URL" style="width:100%;margin-top:8px;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
+<div style="display:flex;gap:10px;align-items:center;margin-top:10px">
+<label style="font-size:.9rem;color:#b8d8c0;cursor:pointer"><input type="checkbox" id="extSong" style="accent-color:#1e5a34"> 🎵 Video song</label>
+<button class="btn" onclick="addExternal()" style="margin-left:auto;padding:10px 26px">Add</button>
 </div>
 <div id="extMsg" style="font-size:.85rem;margin-top:8px"></div>
+<h4 style="margin:16px 0 8px">📚 Your linked movies & songs</h4>
 <div id="extList" style="margin-top:10px"></div>
 </div>
 <div id="movieList"></div>
@@ -444,7 +435,7 @@ async function loadMovies(){
     html+="<h4 style='margin:16px 0 8px'>📦 "+b+"</h4>";
     for(const v of vids){
       const name=v.key.split("/").pop();
-      html+="<div style='display:flex;align-items:center;gap:10px;padding:8px;background:#0a120c;border-radius:8px;margin-bottom:6px'><span style='flex:1;font-size:.9rem'>"+name+"</span><button class='btn' style='padding:6px 14px;font-size:.8rem' data-b='"+b+"' data-k='"+v.key.replace(/'/g,"&#39;")+"' onclick='autoMatch(this)'>🔍 Auto-match</button></div>";
+      html+="<div style='display:flex;align-items:center;gap:10px;padding:8px;background:#0a120c;border-radius:8px;margin-bottom:6px'><span style='flex:1;font-size:.9rem'>"+name+"</span><button class='btn' style='padding:6px 14px;font-size:.8rem' data-b='"+b+"' data-k='"+v.key.replace(/'/g,"&#39;")+"' onclick='autoMatch(this)'>🔍 Auto-match</button><button class='btn' style='padding:6px 14px;font-size:.8rem' data-b='"+b+"' data-k='"+v.key.replace(/'/g,"&#39;")+"' onclick='markSong(this)'>🎵 Song</button></div>";
     }
   }
   box.innerHTML=html||"<p style='color:#7a9a85'>No video files found.</p>";
@@ -457,6 +448,26 @@ async function autoMatch(btn){
     const d=await r.json();
     btn.textContent=r.ok?("✓ "+d.title):("✗ "+(d.error||"failed"));
   }catch(e){btn.textContent="✗ error";}
+}
+async function markSong(btn){
+  const bucket=btn.dataset.b, key=btn.dataset.k;
+  btn.disabled=true;btn.textContent="…";
+  try{
+    const r=await api("/api/admin/setsong?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bucket,key})});
+    const d=await r.json();
+    btn.textContent=r.ok?("✓ "+d.title):("✗ "+(d.error||"failed"));
+  }catch(e){btn.textContent="✗ error";}
+}
+function ytCover(u){
+  u=(u||"").trim();
+  if(!u)return null;
+  var id=null;
+  var i=u.indexOf("youtu.be/"); if(i>=0)id=u.slice(i+9).split(/[/?#]/)[0];
+  if(!id){i=u.indexOf("v="); if(i>=0)id=u.slice(i+2).split(/[&#]/)[0];}
+  if(!id){i=u.indexOf("/shorts/"); if(i>=0)id=u.slice(i+8).split(/[/?#]/)[0];}
+  if(id&&id.length>=6)return "https://img.youtube.com/vi/"+id+"/hqdefault.jpg";
+  if(u.indexOf("http")===0&&(u.indexOf(".jpg")>0||u.indexOf(".png")>0||u.indexOf(".webp")>0))return u;
+  return null;
 }
 function toDirectUrl(u){
   u=(u||"").trim();
@@ -490,24 +501,35 @@ async function addExternal(){
   if(!sources.length){msg.innerHTML='<span class="bad">Paste at least one video URL</span>';return;}
   const url=sources[0].url;
   const title=document.getElementById("extTitle").value.trim()||url;
+  const isSong=document.getElementById("extSong").checked;
   msg.textContent="adding…";
   let tmdb_id=null, type="movie";
-  if(title){
+  if(isSong){type="song";}
+  else if(title){
     const s=await api("/api/admin/tmdb/search?q="+encodeURIComponent(title)+"&pw="+encodeURIComponent(pw()));
     const d=await s.json().catch(()=>({}));
     if(d.results&&d.results.length){tmdb_id=d.results[0].id;type=d.results[0].type||"movie";}
   }
-  const r=await api("/api/admin/external?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({video_url:url,tmdb_id,type,title,sources})});
+  const r=await api("/api/admin/external?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({video_url:url,tmdb_id,type,title,sources,poster:ytCover(document.getElementById("extCover").value)})});
   const d=await r.json().catch(()=>({}));
   msg.innerHTML=r.ok?'<span class="ok">✓ added: '+d.title+'</span>':'<span class="bad">✗ '+(d.error||"failed")+'</span>';
-  if(r.ok){document.getElementById("extVers").innerHTML='<div class="extver" style="display:flex;gap:6px;margin-bottom:6px"><input class="extvlabel" placeholder="Label" value="Hindi" style="width:80px;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px"><input class="extvurl" placeholder="Paste share link or direct URL…" style="flex:1;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px" oninput="convLink(this)"></div>';document.getElementById("extTitle").value="";loadExtList();}
+  if(r.ok){document.getElementById("extSong").checked=false;document.getElementById("extVers").innerHTML='<div class="extver" style="display:flex;gap:6px;margin-bottom:6px"><input class="extvlabel" placeholder="Label" value="Hindi" style="width:80px;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px"><input class="extvurl" placeholder="Paste share link or direct URL…" style="flex:1;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px" oninput="convLink(this)"></div>';document.getElementById("extTitle").value="";document.getElementById("extCover").value="";loadExtList();}
 }
 async function loadExtList(){
   const box=document.getElementById("extList");
   if(!box)return;
   const r=await (await fetch("/api/movies")).json().catch(()=>({movies:[]}));
   const ext=(r.movies||[]).filter(m=>m.external);
-  box.innerHTML=ext.length?ext.map(m=>"<div style='display:flex;align-items:center;gap:10px;padding:8px;background:#060906;border-radius:8px;margin-bottom:6px'><span style='flex:1;font-size:.9rem'>🔗 "+m.title+"</span><button class='btn' style='padding:6px 14px;font-size:.8rem' data-id='"+m.id+"' onclick='delExternal(this)'>Delete</button></div>").join(""):"<p style='color:#7a9a85;font-size:.85rem'>No external links yet.</p>";
+  box.innerHTML=ext.length?ext.map(m=>"<div style='display:flex;align-items:center;gap:10px;padding:8px;background:#060906;border-radius:8px;margin-bottom:6px'><span style='flex:1;font-size:.9rem'>🔗 "+m.title+"</span><button class='btn' style='padding:6px 14px;font-size:.8rem' data-id='"+m.id+"' onclick='ytInfo(this)'>🎬 Video Info</button><button class='btn' style='padding:6px 14px;font-size:.8rem' data-id='"+m.id+"' onclick='delExternal(this)'>Delete</button></div>").join(""):"<p style='color:#7a9a85;font-size:.85rem'>No external links yet.</p>";
+}
+async function ytInfo(btn){
+  const link=prompt("Paste the YouTube link for this video — title and cover will be filled automatically:");
+  if(!link)return;
+  btn.disabled=true;btn.textContent="…";
+  const r=await api("/api/admin/ytinfo?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:btn.dataset.id,url:link})});
+  const d=await r.json().catch(()=>({}));
+  if(r.ok){btn.textContent="✓ "+(d.title||"done");setTimeout(loadExtList,1000);}
+  else{btn.textContent="✗ failed";alert(d.error||"Could not fetch video info from YouTube.");}
 }
 async function delExternal(btn){
   const id=btn.dataset.id;
@@ -534,9 +556,8 @@ const pct=d.total?Math.min(100,d.used/d.total*100):0;
 $("gring").style.strokeDashoffset=402-(402*pct/100);$("gpct").textContent=pct.toFixed(1)+"%";
 $("gused").textContent=fmt(d.used);$("gfree").textContent=fmt(d.total-d.used);$("gtotal").textContent=fmt(d.total);}
 // upload
-async function loadUpBuckets(){const d=await (await api("/api/buckets")).json();$("upBucket").innerHTML=d.buckets.map(b=>"<option>"+b+"</option>").join("");}
-$("drop").onclick=()=>$("file").click();$("file").onchange=e=>upload(e.target.files);
-function ulog(m,cls){const d=document.createElement("div");if(cls)d.className=cls;d.textContent=m;$("ulog").prepend(d);}
+async function loadUpBuckets(){const el=$("upBucket");if(!el)return;const d=await (await api("/api/buckets")).json();el.innerHTML=d.buckets.map(b=>"<option>"+b+"</option>").join("");}
+function ulog(m,cls){const d=document.createElement("div");if(cls)d.className=cls;d.textContent=m;const u=$("ulog");if(u)u.prepend(d);}
 function uput(url,file,onp){return new Promise((res,rej)=>{const x=new XMLHttpRequest();x.open("PUT",url);
 x.upload.onprogress=e=>{if(e.lengthComputable)onp(e.loaded/e.total);};
 x.onload=()=>res(x);x.onerror=()=>rej(new Error("network"));x.send(file);});}
@@ -615,7 +636,6 @@ const r=await api("/api/admin/password?pw="+encodeURIComponent(c),{method:"POST"
 if(r.ok){$("pwMsg").innerHTML='<span class="ok">✓ password changed</span>';sessionStorage.setItem("apw",n);$("pwCur").value=$("pwNew").value=$("pwNew2").value="";}
 else $("pwMsg").innerHTML='<span class="bad">✗ '+(await r.text())+'</span>';};
 // init
-loadUpBuckets();
 </script></body></html>`;
 function mimeType(name){const e=name.split(".").pop().toLowerCase();const m={
 mp4:"video/mp4",webm:"video/webm",mkv:"video/x-matroska",avi:"video/x-msvideo",mov:"video/quicktime",m4v:"video/x-m4v",
@@ -624,7 +644,7 @@ mp3:"audio/mpeg",ogg:"audio/ogg",wav:"audio/wav",m4a:"audio/mp4",flac:"audio/fla
 pdf:"application/pdf",txt:"text/plain",json:"application/json",zip:"application/zip"};return m[e]||"application/octet-stream";}
 
 // ---- Media viewer page ----
-const VIEW_PAGE = (bucket, key, kind) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+const VIEW_PAGE = (bucket, key, kind) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1642095506798662" crossorigin="anonymous"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${key.split("/").pop()} — Redowansky's Library</title>
 <style>
@@ -702,7 +722,7 @@ const EXT_VIEW_PAGE = (m) => {
       </script>`
     : "";
   const player = `<div id="extstage">${playerFor(sources[0].url)}</div>`;
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1642095506798662" crossorigin="anonymous"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${m.title} — Redowansky's Library</title>
 <style>
@@ -727,7 +747,7 @@ if(["jpg","jpeg","png","gif","webp","bmp","svg"].includes(e))return "image";
 if(["mp3","ogg","wav","m4a","flac"].includes(e))return "audio";return "other";}
 
 // ---- Download interstitial (ad slot lives here) ----
-const DL_PAGE = (bucket, key, size) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+const DL_PAGE = (bucket, key, size) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1642095506798662" crossorigin="anonymous"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Download ${key.split("/").pop()} — Redowansky's Library</title>
 <style>
@@ -848,6 +868,12 @@ export class TunnelDO {
       return json({ tunnel: this.ws ? "up" : "down" });
     }
 
+    if (path === "/ads.txt") {
+      return new Response("google.com, pub-1642095506798662, DIRECT, f08c47fec0942fa0\n", {
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+
     if (!env.S3_ACCESS_KEY || !env.S3_SECRET_KEY)
       return new Response("storage backend not configured", { status: 500 });
 
@@ -856,6 +882,8 @@ export class TunnelDO {
         return new Response(PAGE, { headers: { "content-type": "text/html;charset=utf-8" } });
       if (path === "/admin" || path === "/admin.html")
         return new Response(ADMIN_PAGE, { headers: { "content-type": "text/html;charset=utf-8" } });
+      if (path === "/ads.txt")
+        return new Response("google.com, pub-1642095506798662, DIRECT, f08c47fec0942fa0\n", { headers: { "content-type": "text/plain" } });
       if (path === "/api/admin/upload" && request.method === "PUT") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         const bucket = url.searchParams.get("bucket"), key = url.searchParams.get("key");
@@ -930,7 +958,7 @@ export class TunnelDO {
       if (path === "/api/admin/external" && request.method === "POST") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         let body = await request.json();
-        let { video_url, tmdb_id, type, title, sources } = body;
+        let { video_url, tmdb_id, type, title, sources, poster } = body;
         // Multi-source: [{label, url}] for audio/language versions
         let srcList = [];
         if (Array.isArray(sources)) {
@@ -943,7 +971,7 @@ export class TunnelDO {
         video_url = toDirectUrlSrv(video_url);
         if (!srcList.length) srcList = [{ label: "Default", url: video_url }];
         const apiKey = (env.TMDB_KEY || await this.state.storage.get("tmdb_key"));
-        let meta = { title: title || video_url, year: null, overview: null, poster: null, backdrop: null, vote: null, genres: [], type: type || "movie", tmdb: null };
+        let meta = { title: title || video_url, year: null, overview: null, poster: (poster && poster.startsWith("http")) ? poster : null, backdrop: null, vote: null, genres: [], type: type || "movie", tmdb: null };
         if (tmdb_id && apiKey) {
           const d = await tmdbGet("/" + (type || "movie") + "/" + tmdb_id, apiKey);
           if (d) meta = { title: d.title || d.name, year: (d.release_date || d.first_air_date || "").slice(0, 4), overview: d.overview, poster: d.poster_path, backdrop: d.backdrop_path, vote: d.vote_average?.toFixed(1), genres: (d.genres || []).map(x => x.name), type: type || "movie", tmdb: tmdb_id };
@@ -953,6 +981,35 @@ export class TunnelDO {
         extObj[id] = { id, url: video_url, sources: srcList, ...meta };
         await saveExtMovies(env, extObj);
         return json({ ok: true, id, title: meta.title });
+      }
+      // Admin: set poster on an external entry
+      if (path === "/api/admin/extposter" && request.method === "POST") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        const { id, poster } = await request.json();
+        const extObj = await getExtMovies(env);
+        if (!extObj[id]) return json({ error: "not found" }, 404);
+        extObj[id].poster = (poster && poster.startsWith("http")) ? poster : null;
+        await saveExtMovies(env, extObj);
+        return json({ ok: true });
+      }
+      // Admin: pull title + thumbnail from YouTube for an external entry
+      if (path === "/api/admin/ytinfo" && request.method === "POST") {        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        const { id, url: yturl } = await request.json();
+        const extObj = await getExtMovies(env);
+        if (!extObj[id]) return json({ error: "not found" }, 404);
+        const u = yturl || "";
+        let vid = null, i = -1;
+        i = u.indexOf("youtu.be/"); if (i >= 0) vid = u.slice(i + 9).split(/[/?#]/)[0];
+        if (!vid) { i = u.indexOf("v="); if (i >= 0) vid = u.slice(i + 2).split(/[&#]/)[0]; }
+        if (!vid) { i = u.indexOf("/shorts/"); if (i >= 0) vid = u.slice(i + 8).split(/[/?#]/)[0]; }
+        if (!vid) return json({ error: "not a YouTube link" }, 400);
+        const oe = await fetch("https://www.youtube.com/oembed?url=" + encodeURIComponent("https://www.youtube.com/watch?v=" + vid) + "&format=json");
+        if (!oe.ok) return json({ error: "YouTube lookup failed" }, 502);
+        const info = await oe.json().catch(() => ({}));
+        if (info.title) extObj[id].title = info.title;
+        extObj[id].poster = "https://img.youtube.com/vi/" + vid + "/hqdefault.jpg";
+        await saveExtMovies(env, extObj);
+        return json({ ok: true, title: extObj[id].title, poster: extObj[id].poster });
       }
       // Admin: delete external movie link
       if (path === "/api/admin/external" && request.method === "DELETE") {
@@ -1023,6 +1080,17 @@ export class TunnelDO {
         });
         return json({ ok: true });
       }
+      // Admin: mark a file as a video song (no TMDB)
+      if (path === "/api/admin/setsong" && request.method === "POST") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        const { bucket, key } = await request.json();
+        const title = key.split("/").pop().replace(/\.[^.]+$/, "").replace(/[._-]+/g, " ").trim();
+        await this.state.storage.put("meta:"+bucket+":"+key, {
+          title: title || key, year: null, overview: null, poster: null, backdrop: null,
+          vote: null, genres: [], type: "song", tmdb: null,
+        });
+        return json({ ok: true, title });
+      }
       // Admin: auto-match by filename
       if (path === "/api/admin/automatch" && request.method === "POST") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
@@ -1042,6 +1110,38 @@ export class TunnelDO {
           type: "movie", tmdb: r.id,
         });
         return json({ ok: true, title: d.title });
+      }
+
+      // Admin: R2 multipart upload (auth: admin pw OR x-upload-key header matching UPLOAD_KEY secret)
+      const r2ok = async () => (await checkPw(url, env, this.state)) || (!!env.UPLOAD_KEY && request.headers.get("x-upload-key") === env.UPLOAD_KEY);
+      if (path === "/api/admin/r2/init" && request.method === "POST") {
+        if (!(await r2ok())) return json({ error: "wrong password" }, 403);
+        const body = await request.json().catch(() => ({}));
+        if (!body.key) return json({ error: "need key" }, 400);
+        const up = await env.MEDIA.createMultipartUpload(body.key, { httpMetadata: { contentType: body.contentType || "application/octet-stream" } });
+        return json({ ok: true, uploadId: up.uploadId });
+      }
+      if (path === "/api/admin/r2/part" && request.method === "PUT") {
+        if (!(await r2ok())) return json({ error: "wrong password" }, 403);
+        const key = url.searchParams.get("key"), uploadId = url.searchParams.get("uploadId"), partNumber = parseInt(url.searchParams.get("part") || "0");
+        if (!key || !uploadId || !partNumber) return json({ error: "bad params" }, 400);
+        const up = env.MEDIA.resumeMultipartUpload(key, uploadId);
+        const part = await up.uploadPart(partNumber, await request.arrayBuffer());
+        return json({ ok: true, partNumber: part.partNumber, etag: part.etag });
+      }
+      if (path === "/api/admin/r2/complete" && request.method === "POST") {
+        if (!(await r2ok())) return json({ error: "wrong password" }, 403);
+        const body = await request.json().catch(() => ({}));
+        const up = env.MEDIA.resumeMultipartUpload(body.key, body.uploadId);
+        const obj = await up.complete(body.parts || []);
+        return json({ ok: true, key: obj.key, size: obj.size });
+      }
+      if (path === "/api/admin/r2/abort" && request.method === "POST") {
+        if (!(await r2ok())) return json({ error: "wrong password" }, 403);
+        const body = await request.json().catch(() => ({}));
+        const up = env.MEDIA.resumeMultipartUpload(body.key, body.uploadId);
+        await up.abort();
+        return json({ ok: true });
       }
       if (path === "/api/admin/stats" && request.method === "GET") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
