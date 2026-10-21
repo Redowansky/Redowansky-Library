@@ -129,8 +129,6 @@ section.row h2{font-size:1.3rem;margin-bottom:14px;font-weight:700}
 .modal-info p{line-height:1.7;color:#c8e0d0;margin-bottom:20px}
 .genres{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
 .genres span{background:#1e3a2a;padding:4px 12px;border-radius:999px;font-size:.8rem}
-#status{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#0c1410;border:1px solid #1e3a2a;padding:8px 20px;border-radius:999px;font-size:.85rem;z-index:300}
-#status.ok{border-color:var(--grn)}#status.bad{border-color:#ff7b7b}
 .empty{text-align:center;color:#55556a;padding:80px 20px}
 @media(max-width:640px){
 .hero-info h1{font-size:1.8rem}
@@ -158,12 +156,11 @@ section.row{padding:0 12px}
 <main id="main" style="padding-top:20px"></main>
 <div class="modal" id="modal"><div class="modal-box"><button class="modal-x" onclick="closeModal()">✕</button>
 <div class="modal-hero" id="mhero"><div class="mg"></div></div><div class="modal-info" id="minfo"></div></div></div>
-<div id="status">loading…</div>
 <script>
 let ALL=[];
 const $=id=>document.getElementById(id);
 const IMG='https://image.tmdb.org/t/p/w500', BG='https://image.tmdb.org/t/p/original';
-function setStatus(m,ok){const s=$('status');s.textContent=m;s.className=ok||'';}
+function setStatus(m,ok){const s=$('status');if(!s)return;s.textContent=m;s.className=ok||'';}
 window.onscroll=()=>$('hdr').classList.toggle('scrolled',scrollY>50);
 async function load(){
   try{
@@ -181,7 +178,6 @@ async function load(){
       $('hp').href=feat.external?'/view/ext/'+feat.id:'/view/'+encodeURIComponent(feat.bucket)+'/'+feat.key.split('/').map(encodeURIComponent).join('/');
       $('hi').onclick=()=>openModal(feat);
     }
-    setStatus('● '+ALL.length+' titles','ok');
   }catch(e){setStatus('● offline','bad');}
 }
 function card(m){
@@ -312,7 +308,6 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <nav>
 <h2>◈ Library Admin</h2>
 <button data-s="dash" class="on">📊 <span>Dashboard</span></button>
-<button data-s="shelves">📦 <span>Shelves</span></button>
 <button data-s="movies">🎬 <span>Movies</span></button>
 <button data-s="settings">⚙️ <span>Settings</span></button>
 </nav>
@@ -340,12 +335,6 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <div class="ginfo"><div>Used: <b id="gused">…</b></div><div>Free: <b id="gfree">…</b></div><div>Total: <b id="gtotal">…</b></div></div>
 </div></div>
 <!-- UPLOAD -->
-<!-- SHELVES -->
-<div class="sec" id="s-shelves">
-<h1>📦 Shelves</h1><p class="desc">Organize your library into categories like movies, books, songs.</p>
-<div class="row"><input id="newShelf" placeholder="new shelf name…" style="flex:1"><button class="btn" id="addShelf">+ Add</button></div>
-<div id="shelfList" style="margin-top:16px"></div>
-</div>
 <!-- MOVIES (TMDB matching) -->
 <div class="sec" id="s-movies">
 <h1>🎬 Movies & Songs</h1><p class="desc">Add movies and video songs by link, or upload a raw file for processing. They appear on the site instantly.</p>
@@ -576,7 +565,7 @@ async function startR2Upload(){
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(!authed)return;
 document.querySelectorAll("nav button").forEach(x=>x.classList.remove("on"));b.classList.add("on");
 document.querySelectorAll(".sec").forEach(s=>s.classList.remove("on"));$("s-"+b.dataset.s).classList.add("on");
-if(b.dataset.s==="dash")loadDash();if(b.dataset.s==="files")loadFiles();if(b.dataset.s==="shelves")loadShelves();if(b.dataset.s==="movies"){loadMovies();loadIncoming();r2ResumeHint();}});
+if(b.dataset.s==="dash")loadDash();if(b.dataset.s==="files")loadFiles();if(b.dataset.s==="movies"){loadMovies();loadIncoming();r2ResumeHint();}});
 async function saveTmdbKey(){
   const k=document.getElementById("tmdbKey").value.trim();
   if(!k)return;
@@ -783,20 +772,6 @@ async function doCopy(b,key,nb,nm2){const r=await api("/api/admin/copy?bucket="+
 if(r.ok)loadFiles();}
 async function doMove(b,key,nb,nm2){const r=await api("/api/admin/move?bucket="+encodeURIComponent(b)+"&key="+encodeURIComponent(key)+"&dest="+encodeURIComponent(nb)+"&pw="+encodeURIComponent(pw()),{method:"POST"});
 if(r.ok)loadFiles();}
-// shelves
-function cleanShelf(s){return s.trim().toLowerCase().replace(/[\\u{1F000}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{FE0F}]/gu,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40);}
-async function loadShelves(){const box=$("shelfList");box.innerHTML="";
-const d=await (await api("/api/buckets")).json();
-d.buckets.forEach(b=>{const row=document.createElement("div");row.className="shelfrow";
-row.innerHTML='<span class="nm">📦 '+b+'</span>';
-const del=document.createElement("button");del.className="iconbtn";del.style.color="var(--red)";del.textContent="✕";
-del.onclick=async()=>{if(!confirm("Delete shelf '"+b+"' and ALL its files?"))return;
-const r=await api("/api/admin/buckets?name="+encodeURIComponent(b)+"&pw="+encodeURIComponent(pw()),{method:"DELETE"});
-if(r.ok){loadShelves();loadUpBuckets();}};
-row.appendChild(del);box.appendChild(row);});}
-$("addShelf").onclick=async()=>{const n=cleanShelf($("newShelf").value);if(!n||n.length<3)return;
-const r=await api("/api/admin/buckets?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:n})});
-if(r.ok){$("newShelf").value="";loadShelves();loadUpBuckets();}};
 // settings
 $("pwChange").onclick=async()=>{const c=$("pwCur").value,n=$("pwNew").value,n2=$("pwNew2").value;
 if(n!==n2){$("pwMsg").innerHTML='<span class="bad">new passwords don\\'t match</span>';return;}
