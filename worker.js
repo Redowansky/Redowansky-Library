@@ -355,6 +355,7 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <button class="btn danger" id="incAbort" style="display:none" onclick="abortR2Upload()">Cancel</button>
 </div>
 <div style="background:#060906;border-radius:6px;height:10px;margin-top:12px;overflow:hidden"><div id="incBar" style="background:#00e676;height:100%;width:0%"></div></div>
+<div id="incStats" style="font-size:.85rem;margin-top:6px;color:#7a9a85;font-variant-numeric:tabular-nums"></div>
 <div id="incStatus" style="font-size:.85rem;margin-top:8px;color:#b8d8c0"></div>
 <h4 style="margin:16px 0 4px">🗂 Waiting in incoming/</h4>
 <div id="incList"></div>
@@ -415,6 +416,8 @@ const $=id=>document.getElementById(id);
 let authed=false;
 function api(p,o={}){return fetch(p,o);}
 function fmt(n){if(!n&&n!==0)return "—";const u=["B","KB","MB","GB"];let i=0;while(n>=1024&&i<3){n/=1024;i++;}return n.toFixed(n<10&&i>0?1:0)+" "+u[i];}
+function fmtDur(s){if(!isFinite(s)||s<0)return "—";s=Math.round(s);const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=s%60;return (h>0?h+":"+("0"+m).slice(-2):m)+":"+("0"+ss).slice(-2);}
+function fmtSpd(b){if(!isFinite(b)||b<=0)return "—";if(b>=1048576)return (b/1048576).toFixed(1)+" MB/s";if(b>=1024)return Math.round(b/1024)+" KB/s";return Math.round(b)+" B/s";}
 function safeName(n){const d=n.lastIndexOf(".");const e=d>0?n.slice(d):"";let b=d>0?n.slice(0,d):n;
 b=b.normalize("NFKD").replace(/[̀-ͯ]/g,"").replace(/[^a-zA-Z0-9._-]+/g,"-").replace(/-+/g,"-").replace(/^-+|-+$/g,"").slice(0,80)||"file";return b+e;}
 // ---- R2 incoming uploader ----
@@ -480,6 +483,7 @@ async function startR2Upload(){
   const nparts=Math.max(1,Math.ceil(file.size/PART));
   const btn=$("incBtn"); btn.disabled=true; $("incAbort").style.display="";
   let wake=null; try{ wake=await navigator.wakeLock.request("screen"); }catch(e){}
+  let upTimer=null;
   let pausedMsg=null;
   try{
     const saved=upLoad();
@@ -495,6 +499,21 @@ async function startR2Upload(){
     }
     const doneNums={}; r2up.parts.forEach(function(p){ doneNums[p.partNumber]=true; });
     let sent=0;
+    let upBase=0; for(let j=1;j<=nparts;j++){ if(doneNums[j]) upBase+=Math.min(file.size,j*PART)-(j-1)*PART; }
+    const upT0=Date.now(); let upPrevT=upT0, upPrevB=0, upCur=0;
+    function renderStats(){
+      const el=$("incStats"); if(!el)return;
+      const elap=(Date.now()-upT0)/1000, sess=sent-upBase;
+      const avg=elap>0.5?sess/elap:0, spd=upCur>0?upCur:avg, rem=file.size-sent;
+      el.textContent=fmtSpd(spd)+" · avg "+fmtSpd(avg)+" · ETA "+(spd>0?fmtDur(rem/spd):"—")+" · Elapsed "+fmtDur(elap);
+    }
+    function sampleStats(){
+      const now=Date.now(), sess=sent-upBase, dt=(now-upPrevT)/1000;
+      if(dt>=1){ const inst=(sess-upPrevB)/dt; if(inst>0) upCur=upCur>0?upCur*0.5+inst*0.5:inst; upPrevT=now; upPrevB=sess; }
+      renderStats();
+    }
+    upTimer=setInterval(renderStats,1000);
+    renderStats();
     for(let i=1;i<=nparts;i++){
       const bsize=Math.min(file.size,i*PART)-(i-1)*PART;
       if(doneNums[i]){ sent+=bsize; continue; }
@@ -514,6 +533,7 @@ async function startR2Upload(){
       sent+=blob.size;
       const pct=Math.round(sent/file.size*100);
       bar.style.width=pct+"%";
+      sampleStats();
       st.textContent="Uploading… "+pct+"% (part "+i+"/"+nparts+", "+fmt(sent)+" of "+fmt(file.size)+"). Progress is saved — a crash won't restart you from zero.";
     }
     if(r2up.cancelled) throw new Error("cancelled");
@@ -532,6 +552,7 @@ async function startR2Upload(){
   }catch(e){
     if(e.message==="cancelled"){
       st.textContent="Upload cancelled.";
+      $("incStats").textContent="";
       if(r2up&&r2up.uploadId){ try{ await api("/api/admin/r2/abort?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:key,uploadId:r2up.uploadId})}); }catch(_){}}
       upClear(); bar.style.width="0%";
     }else if(e.message==="__paused__"){
@@ -542,6 +563,7 @@ async function startR2Upload(){
       st.textContent="❌ Upload stopped: "+e.message+". Any parts already sent are saved — pick the same file and press Upload to continue.";
     }
   }finally{
+    if(upTimer){ clearInterval(upTimer); upTimer=null; }
     r2up=null; btn.disabled=false;
     $("incAbort").style.display=upLoad()?"":"none";
     if(wake) try{ wake.release(); }catch(e){}
