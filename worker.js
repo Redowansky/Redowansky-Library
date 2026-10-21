@@ -345,7 +345,20 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 </div>
 <!-- MOVIES (TMDB matching) -->
 <div class="sec" id="s-movies">
-<h1>🎬 Movies & Songs</h1><p class="desc">Add movies and video songs by link. They appear on the site instantly.</p>
+<h1>🎬 Movies & Songs</h1><p class="desc">Add movies and video songs by link, or upload a raw file for processing. They appear on the site instantly.</p>
+<div style="background:#0a120c;border:1px solid #1e3a2a;border-radius:12px;padding:14px;margin-bottom:16px">
+<h4 style="margin-bottom:10px">📥 Upload raw movie to R2 (for processing)</h4>
+<p style="color:#7a9a85;font-size:.85rem;margin-bottom:10px">Upload the raw file (any size, MKV is fine). It lands in R2 <b>incoming/</b> — Pepper downloads it fast, keeps the right audio track, adds it to the library, then deletes the raw. Keep this tab open while it uploads.</p>
+<input type="file" id="incFile" style="width:100%;color:#b8d8c0;margin-bottom:10px">
+<div style="display:flex;gap:10px;align-items:center">
+<button class="btn" id="incBtn" onclick="startR2Upload()">⬆️ Upload to R2</button>
+<button class="btn danger" id="incAbort" style="display:none" onclick="abortR2Upload()">Cancel</button>
+</div>
+<div style="background:#060906;border-radius:6px;height:10px;margin-top:12px;overflow:hidden"><div id="incBar" style="background:#00e676;height:100%;width:0%"></div></div>
+<div id="incStatus" style="font-size:.85rem;margin-top:8px;color:#b8d8c0"></div>
+<h4 style="margin:16px 0 4px">🗂 Waiting in incoming/</h4>
+<div id="incList"></div>
+</div>
 <h3>🎬 Movie Info (TMDB)</h3>
 <p style="color:#7a9a85;font-size:.9rem;margin-bottom:14px">Match your video files to TMDB for posters & info. Get a free API key at <a href="https://www.themoviedb.org/settings/api" target="_blank" style="color:#00e676">themoviedb.org/settings/api</a></p>
 <div style="display:flex;gap:10px;margin-bottom:16px">
@@ -404,11 +417,85 @@ function api(p,o={}){return fetch(p,o);}
 function fmt(n){if(!n&&n!==0)return "—";const u=["B","KB","MB","GB"];let i=0;while(n>=1024&&i<3){n/=1024;i++;}return n.toFixed(n<10&&i>0?1:0)+" "+u[i];}
 function safeName(n){const d=n.lastIndexOf(".");const e=d>0?n.slice(d):"";let b=d>0?n.slice(0,d):n;
 b=b.normalize("NFKD").replace(/[̀-ͯ]/g,"").replace(/[^a-zA-Z0-9._-]+/g,"-").replace(/-+/g,"-").replace(/^-+|-+$/g,"").slice(0,80)||"file";return b+e;}
+// ---- R2 incoming uploader ----
+let r2up=null;
+async function loadIncoming(){
+  const box=$("incList"); if(!box)return;
+  try{
+    const r=await (await api("/api/admin/r2/incoming?pw="+encodeURIComponent(pw()))).json();
+    if(!r.ok){box.innerHTML="";return;}
+    window._incItems=r.items;
+    if(!r.items.length){box.innerHTML="<p style='color:#7a9a85;font-size:.85rem'>Nothing waiting in incoming/ right now.</p>";return;}
+    box.innerHTML=r.items.map(function(it,i){
+      const name=it.key.slice("incoming/".length);
+      return "<div style='display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #12271a'>"
+        +"<span style='flex:1;word-break:break-all'>📄 "+name+"</span>"
+        +"<span style='color:#7a9a85;font-size:.82rem'>"+fmt(it.size)+"</span>"
+        +"<button class='btn danger' style='padding:5px 10px;font-size:.78rem' onclick='delIncomingIdx("+i+")'>Delete</button></div>";
+    }).join("");
+  }catch(e){box.innerHTML="";}
+}
+async function delIncomingIdx(i){
+  const it=(window._incItems||[])[i]; if(!it)return;
+  if(!confirm("Delete "+it.key+" from incoming/?"))return;
+  await api("/api/admin/r2/incoming?key="+encodeURIComponent(it.key)+"&pw="+encodeURIComponent(pw()),{method:"DELETE"});
+  loadIncoming();
+}
+async function abortR2Upload(){ if(r2up) r2up.cancelled=true; }
+async function startR2Upload(){
+  const inp=$("incFile"),st=$("incStatus"),bar=$("incBar");
+  const file=inp.files&&inp.files[0];
+  if(!file){st.textContent="Pick a file first.";return;}
+  if(r2up){st.textContent="An upload is already running.";return;}
+  const key="incoming/"+safeName(file.name);
+  const PART=25*1024*1024;
+  const nparts=Math.max(1,Math.ceil(file.size/PART));
+  const btn=$("incBtn"); btn.disabled=true; $("incAbort").style.display="";
+  let wake=null; try{ wake=await navigator.wakeLock.request("screen"); }catch(e){}
+  try{
+    st.textContent="Starting upload of "+file.name+" ("+fmt(file.size)+", "+nparts+" parts)…";
+    const init=await (await api("/api/admin/r2/init?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:key,contentType:file.type||"application/octet-stream"})})).json();
+    if(!init.uploadId) throw new Error(init.error||"init failed");
+    r2up={key:key,uploadId:init.uploadId,parts:[],cancelled:false};
+    let sent=0;
+    for(let i=1;i<=nparts;i++){
+      if(r2up.cancelled) throw new Error("cancelled");
+      const blob=file.slice((i-1)*PART,Math.min(file.size,i*PART));
+      let part=null,lastErr=null;
+      for(let attempt=0;attempt<3&&!part;attempt++){
+        try{
+          const r=await (await api("/api/admin/r2/part?key="+encodeURIComponent(key)+"&uploadId="+encodeURIComponent(r2up.uploadId)+"&part="+i+"&pw="+encodeURIComponent(pw()),{method:"PUT",body:blob})).json();
+          if(r.ok) part=r; else lastErr=new Error(r.error||"part failed");
+        }catch(e){ lastErr=e; }
+      }
+      if(!part) throw lastErr||new Error("part "+i+" failed");
+      r2up.parts.push({partNumber:part.partNumber,etag:part.etag});
+      sent+=blob.size;
+      const pct=Math.round(sent/file.size*100);
+      bar.style.width=pct+"%";
+      st.textContent="Uploading… "+pct+"% (part "+i+"/"+nparts+", "+fmt(sent)+" of "+fmt(file.size)+") — keep this tab open.";
+    }
+    const done=await (await api("/api/admin/r2/complete?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:key,uploadId:r2up.uploadId,parts:r2up.parts})})).json();
+    if(!done.ok) throw new Error(done.error||"complete failed");
+    st.textContent="✅ Uploaded to R2 as "+key+" ("+fmt(done.size)+"). Pepper will process it into the library — the raw file is deleted afterwards.";
+    bar.style.width="100%";
+    inp.value="";
+    loadIncoming();
+  }catch(e){
+    st.textContent="❌ Upload stopped: "+e.message+". Trying again restarts from the beginning.";
+    if(r2up&&r2up.uploadId){
+      try{ await api("/api/admin/r2/abort?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:key,uploadId:r2up.uploadId})}); }catch(_){}
+    }
+  }finally{
+    r2up=null; btn.disabled=false; $("incAbort").style.display="none";
+    if(wake) try{ wake.release(); }catch(e){}
+  }
+}
 // nav
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(!authed)return;
 document.querySelectorAll("nav button").forEach(x=>x.classList.remove("on"));b.classList.add("on");
 document.querySelectorAll(".sec").forEach(s=>s.classList.remove("on"));$("s-"+b.dataset.s).classList.add("on");
-if(b.dataset.s==="dash")loadDash();if(b.dataset.s==="files")loadFiles();if(b.dataset.s==="shelves")loadShelves();if(b.dataset.s==="movies")loadMovies();});
+if(b.dataset.s==="dash")loadDash();if(b.dataset.s==="files")loadFiles();if(b.dataset.s==="shelves")loadShelves();if(b.dataset.s==="movies"){loadMovies();loadIncoming();}});
 async function saveTmdbKey(){
   const k=document.getElementById("tmdbKey").value.trim();
   if(!k)return;
@@ -1141,6 +1228,25 @@ export class TunnelDO {
         const body = await request.json().catch(() => ({}));
         const up = env.MEDIA.resumeMultipartUpload(body.key, body.uploadId);
         await up.abort();
+        return json({ ok: true });
+      }
+      // Admin: list/delete raw files waiting in R2 incoming/ (the processing queue)
+      if (path === "/api/admin/r2/incoming" && request.method === "GET") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        const items = [];
+        let cursor;
+        do {
+          const page = await env.MEDIA.list({ prefix: "incoming/", limit: 500, cursor });
+          for (const o of page.objects) items.push({ key: o.key, size: o.size, uploaded: o.uploaded });
+          cursor = page.truncated ? page.cursor : undefined;
+        } while (cursor && items.length < 2000);
+        return json({ ok: true, items });
+      }
+      if (path === "/api/admin/r2/incoming" && request.method === "DELETE") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        const key = url.searchParams.get("key") || "";
+        if (!key.startsWith("incoming/")) return json({ error: "only incoming/ files" }, 400);
+        await env.MEDIA.delete(key);
         return json({ ok: true });
       }
       if (path === "/api/admin/stats" && request.method === "GET") {
