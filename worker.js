@@ -348,8 +348,8 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <h1>🎬 Movies & Songs</h1><p class="desc">Add movies and video songs by link, or upload a raw file for processing. They appear on the site instantly.</p>
 <div style="background:#0a120c;border:1px solid #1e3a2a;border-radius:12px;padding:14px;margin-bottom:16px">
 <h4 style="margin-bottom:10px">📥 Upload raw movie to R2 (for processing)</h4>
-<p style="color:#7a9a85;font-size:.85rem;margin-bottom:10px">Upload the raw file (any size, MKV is fine). It lands in R2 <b>incoming/</b> — Pepper downloads it fast, keeps the right audio track, adds it to the library, then deletes the raw. Keep this tab open while it uploads.</p>
-<input type="file" id="incFile" style="width:100%;color:#b8d8c0;margin-bottom:10px">
+<p style="color:#7a9a85;font-size:.85rem;margin-bottom:10px">Upload the raw file (any size, MKV is fine). It lands in R2 <b>incoming/</b> — Pepper downloads it fast, keeps the right audio track, adds it to the library, then deletes the raw. <b>Progress is saved as it uploads:</b> if this tab or the browser crashes, reopen this page, pick the same file, and press Upload again — it continues where it stopped instead of starting from zero.</p>
+<input type="file" id="incFile" onchange="r2ResumeHint()" style="width:100%;color:#b8d8c0;margin-bottom:10px">
 <div style="display:flex;gap:10px;align-items:center">
 <button class="btn" id="incBtn" onclick="startR2Upload()">⬆️ Upload to R2</button>
 <button class="btn danger" id="incAbort" style="display:none" onclick="abortR2Upload()">Cancel</button>
@@ -441,7 +441,35 @@ async function delIncomingIdx(i){
   await api("/api/admin/r2/incoming?key="+encodeURIComponent(it.key)+"&pw="+encodeURIComponent(pw()),{method:"DELETE"});
   loadIncoming();
 }
-async function abortR2Upload(){ if(r2up) r2up.cancelled=true; }
+function upSig(file){ return file.name+"|"+file.size+"|"+(file.lastModified||0); }
+function upSave(){
+  if(!r2up) return;
+  try{ localStorage.setItem("ls_r2up_v1", JSON.stringify({sig:r2up.sig,key:r2up.key,uploadId:r2up.uploadId,parts:r2up.parts,fileName:r2up.fileName,fileSize:r2up.fileSize,updatedAt:Date.now()})); }catch(e){}
+}
+function upLoad(){ try{ const s=localStorage.getItem("ls_r2up_v1"); return s?JSON.parse(s):null; }catch(e){ return null; } }
+function upClear(){ try{ localStorage.removeItem("ls_r2up_v1"); }catch(e){} }
+function r2ResumeHint(){
+  if(r2up) return;
+  const saved=upLoad(), st=$("incStatus"), ab=$("incAbort"), inp=$("incFile");
+  if(!saved){ ab.style.display="none"; return; }
+  const file=inp.files&&inp.files[0];
+  if(file&&saved.sig===upSig(file)){
+    st.textContent="💾 Saved progress found for "+saved.fileName+" — "+saved.parts.length+" parts are already in R2. Press Upload to continue where it stopped, no restart from zero.";
+    ab.style.display="";
+  }else if(!file){
+    st.textContent="💾 A partial upload of "+saved.fileName+" is saved ("+saved.parts.length+" parts). Pick that same file to continue it, or press Cancel to discard it.";
+    ab.style.display="";
+  }
+}
+async function abortR2Upload(){
+  if(r2up){ r2up.cancelled=true; return; }
+  const saved=upLoad();
+  if(saved){
+    if(!confirm("Discard the saved partial upload of "+saved.fileName+" ("+saved.parts.length+" parts)? Those parts will be removed from R2."))return;
+    try{ await api("/api/admin/r2/abort?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:saved.key,uploadId:saved.uploadId})}); }catch(e){}
+    upClear(); $("incStatus").textContent="Saved upload discarded."; $("incBar").style.width="0%"; $("incAbort").style.display="none";
+  }
+}
 async function startR2Upload(){
   const inp=$("incFile"),st=$("incStatus"),bar=$("incBar");
   const file=inp.files&&inp.files[0];
@@ -452,13 +480,24 @@ async function startR2Upload(){
   const nparts=Math.max(1,Math.ceil(file.size/PART));
   const btn=$("incBtn"); btn.disabled=true; $("incAbort").style.display="";
   let wake=null; try{ wake=await navigator.wakeLock.request("screen"); }catch(e){}
+  let pausedMsg=null;
   try{
-    st.textContent="Starting upload of "+file.name+" ("+fmt(file.size)+", "+nparts+" parts)…";
-    const init=await (await api("/api/admin/r2/init?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:key,contentType:file.type||"application/octet-stream"})})).json();
-    if(!init.uploadId) throw new Error(init.error||"init failed");
-    r2up={key:key,uploadId:init.uploadId,parts:[],cancelled:false};
+    const saved=upLoad();
+    if(saved&&saved.sig===upSig(file)&&saved.key===key&&saved.uploadId){
+      r2up={key:key,uploadId:saved.uploadId,parts:saved.parts||[],cancelled:false,sig:saved.sig,fileName:file.name,fileSize:file.size};
+      st.textContent="↩️ Resuming "+file.name+" — "+r2up.parts.length+" of "+nparts+" parts already uploaded…";
+    }else{
+      st.textContent="Starting upload of "+file.name+" ("+fmt(file.size)+", "+nparts+" parts)…";
+      const init=await (await api("/api/admin/r2/init?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:key,contentType:file.type||"application/octet-stream"})})).json();
+      if(!init.uploadId) throw new Error(init.error||"init failed");
+      r2up={key:key,uploadId:init.uploadId,parts:[],cancelled:false,sig:upSig(file),fileName:file.name,fileSize:file.size};
+      upSave();
+    }
+    const doneNums={}; r2up.parts.forEach(function(p){ doneNums[p.partNumber]=true; });
     let sent=0;
     for(let i=1;i<=nparts;i++){
+      const bsize=Math.min(file.size,i*PART)-(i-1)*PART;
+      if(doneNums[i]){ sent+=bsize; continue; }
       if(r2up.cancelled) throw new Error("cancelled");
       const blob=file.slice((i-1)*PART,Math.min(file.size,i*PART));
       let part=null,lastErr=null;
@@ -468,26 +507,43 @@ async function startR2Upload(){
           if(r.ok) part=r; else lastErr=new Error(r.error||"part failed");
         }catch(e){ lastErr=e; }
       }
-      if(!part) throw lastErr||new Error("part "+i+" failed");
+      if(!part){ pausedMsg="part "+i+" would not go through ("+(lastErr?lastErr.message:"network error")+")"; throw new Error("__paused__"); }
       r2up.parts.push({partNumber:part.partNumber,etag:part.etag});
+      r2up.parts.sort(function(a,b){return a.partNumber-b.partNumber;});
+      upSave();
       sent+=blob.size;
       const pct=Math.round(sent/file.size*100);
       bar.style.width=pct+"%";
-      st.textContent="Uploading… "+pct+"% (part "+i+"/"+nparts+", "+fmt(sent)+" of "+fmt(file.size)+") — keep this tab open.";
+      st.textContent="Uploading… "+pct+"% (part "+i+"/"+nparts+", "+fmt(sent)+" of "+fmt(file.size)+"). Progress is saved — a crash won't restart you from zero.";
     }
+    if(r2up.cancelled) throw new Error("cancelled");
+    r2up.parts.sort(function(a,b){return a.partNumber-b.partNumber;});
     const done=await (await api("/api/admin/r2/complete?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:key,uploadId:r2up.uploadId,parts:r2up.parts})})).json();
-    if(!done.ok) throw new Error(done.error||"complete failed");
-    st.textContent="✅ Uploaded to R2 as "+key+" ("+fmt(done.size)+"). Pepper will process it into the library — the raw file is deleted afterwards.";
+    if(!done.ok){
+      let landed=false;
+      try{ const q=await (await api("/api/admin/r2/incoming?pw="+encodeURIComponent(pw()))).json(); (q.items||[]).forEach(function(it){ if(it.key===key&&it.size===file.size) landed=true; }); }catch(e){}
+      if(!landed){ pausedMsg="the final step failed ("+(done.error||"unknown error")+") — all parts are uploaded, press Upload again to finish"; throw new Error("__paused__"); }
+    }
+    upClear();
+    st.textContent="✅ Uploaded to R2 as "+key+" ("+fmt(file.size)+"). Pepper will process it into the library — the raw file is deleted afterwards.";
     bar.style.width="100%";
     inp.value="";
     loadIncoming();
   }catch(e){
-    st.textContent="❌ Upload stopped: "+e.message+". Trying again restarts from the beginning.";
-    if(r2up&&r2up.uploadId){
-      try{ await api("/api/admin/r2/abort?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:key,uploadId:r2up.uploadId})}); }catch(_){}
+    if(e.message==="cancelled"){
+      st.textContent="Upload cancelled.";
+      if(r2up&&r2up.uploadId){ try{ await api("/api/admin/r2/abort?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:key,uploadId:r2up.uploadId})}); }catch(_){}}
+      upClear(); bar.style.width="0%";
+    }else if(e.message==="__paused__"){
+      const pct2=r2up?Math.min(99,Math.round(r2up.parts.length*PART/Math.max(1,file.size)*100)):0;
+      st.textContent="⏸ Upload paused: "+pausedMsg+". Progress is saved at part "+(r2up?r2up.parts.length:0)+"/"+nparts+" (~"+pct2+"%). Pick the same file and press Upload to continue — no restart from zero.";
+      bar.style.width=pct2+"%";
+    }else{
+      st.textContent="❌ Upload stopped: "+e.message+". Any parts already sent are saved — pick the same file and press Upload to continue.";
     }
   }finally{
-    r2up=null; btn.disabled=false; $("incAbort").style.display="none";
+    r2up=null; btn.disabled=false;
+    $("incAbort").style.display=upLoad()?"":"none";
     if(wake) try{ wake.release(); }catch(e){}
   }
 }
@@ -495,7 +551,7 @@ async function startR2Upload(){
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(!authed)return;
 document.querySelectorAll("nav button").forEach(x=>x.classList.remove("on"));b.classList.add("on");
 document.querySelectorAll(".sec").forEach(s=>s.classList.remove("on"));$("s-"+b.dataset.s).classList.add("on");
-if(b.dataset.s==="dash")loadDash();if(b.dataset.s==="files")loadFiles();if(b.dataset.s==="shelves")loadShelves();if(b.dataset.s==="movies"){loadMovies();loadIncoming();}});
+if(b.dataset.s==="dash")loadDash();if(b.dataset.s==="files")loadFiles();if(b.dataset.s==="shelves")loadShelves();if(b.dataset.s==="movies"){loadMovies();loadIncoming();r2ResumeHint();}});
 async function saveTmdbKey(){
   const k=document.getElementById("tmdbKey").value.trim();
   if(!k)return;
