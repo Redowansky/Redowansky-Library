@@ -1232,7 +1232,7 @@ export class TunnelDO {
       }
       // Admin: list/delete raw files waiting in R2 incoming/ (the processing queue)
       if (path === "/api/admin/r2/incoming" && request.method === "GET") {
-        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        if (!(await r2ok())) return json({ error: "wrong password" }, 403);
         const items = [];
         let cursor;
         do {
