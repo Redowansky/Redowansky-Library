@@ -1243,7 +1243,7 @@ export class TunnelDO {
         return json({ ok: true, items });
       }
       if (path === "/api/admin/r2/incoming" && request.method === "DELETE") {
-        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        if (!(await r2ok())) return json({ error: "wrong password" }, 403);
         const key = url.searchParams.get("key") || "";
         if (!key.startsWith("incoming/")) return json({ error: "only incoming/ files" }, 400);
         await env.MEDIA.delete(key);
