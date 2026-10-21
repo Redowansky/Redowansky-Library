@@ -214,7 +214,7 @@ function openModal(m){
 function closeModal(){$('modal').classList.remove('open');}
 $('modal').onclick=e=>{if(e.target.id==='modal')closeModal();};
 load();
-</script></body></html>`;
+</script><footer style="text-align:center;padding:28px 12px 36px;color:#5f7a68;font-size:.85rem">👀 __VIEWS_TODAY__ viewers today</footer></body></html>`;
 
 // ---- TMDB helpers ----
 function toDirectUrlSrv(u){
@@ -330,6 +330,9 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <div class="card"><div class="v" id="st-tunnel">…</div><div class="l">Tunnel</div></div>
 <div class="card"><div class="v" id="st-buckets">…</div><div class="l">Shelves</div></div>
 <div class="card"><div class="v" id="st-files">…</div><div class="l">Files</div></div>
+<div class="card"><div class="v" id="st-viewers">…</div><div class="l">👀 Viewers today</div></div>
+<div class="card"><div class="v" id="st-visits">…</div><div class="l">Visits today</div></div>
+<div class="card"><div class="v" id="st-total">…</div><div class="l">Total visits</div></div>
 </div>
 <div class="gaugebox">
 <div class="gauge"><svg width="150" height="150"><circle cx="75" cy="75" r="64" fill="none" stroke="#1e3a2a" stroke-width="12"/><circle id="gring" cx="75" cy="75" r="64" fill="none" stroke="#00e676" stroke-width="12" stroke-linecap="round" stroke-dasharray="402" stroke-dashoffset="402"/></svg>
@@ -717,6 +720,7 @@ async function loadDash(){const r=await api("/api/admin/stats?pw="+encodeURIComp
 const d=await r.json();
 $("st-tunnel").textContent=d.tunnel==="up"?"● UP":"● DOWN";$("st-tunnel").style.color=d.tunnel==="up"?"var(--grn)":"var(--red)";
 $("st-buckets").textContent=d.buckets;$("st-files").textContent=d.files;
+if(d.views){$("st-viewers").textContent=d.views.viewersToday;$("st-visits").textContent=d.views.hitsToday;$("st-total").textContent=d.views.totalHits;}
 const pct=d.total?Math.min(100,d.used/d.total*100):0;
 $("gring").style.strokeDashoffset=402-(402*pct/100);$("gpct").textContent=pct.toFixed(1)+"%";
 $("gused").textContent=fmt(d.used);$("gfree").textContent=fmt(d.total-d.used);$("gtotal").textContent=fmt(d.total);}
@@ -853,6 +857,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 : `<p style="padding:40px;color:#7a9a85">Preview not available for this file type.</p>`}</div>
 <div class="adslot"><!-- AdSense ad unit goes here --></div>
 <div class="bar"><a class="btn" href="/d/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")} ">⭳ Download</a><a class="btn ghost" href="/dl/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")} ">Details</a></div>
+<div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
 </body></html>`;
 const EXT_VIEW_PAGE = (m) => {
   const sources = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
@@ -904,6 +909,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 ${switcher}
 <div class="stage">${player}</div>
 <p class="note">🔗 streamed from external host</p>
+<div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
 </body></html>`;
 };
 function mediaKind(name){const e=name.split(".").pop().toLowerCase();
@@ -937,6 +943,7 @@ h1{font-size:1.3rem;margin-bottom:6px;word-break:break-all}
 <a class="back" href="/">← back to library</a>
 </div>
 <script>function fmtSize(n){if(!n)return "—";const u=["B","KB","MB","GB"];let i=0;while(n>=1024&&i<3){n/=1024;i++;}return n.toFixed(1)+" "+u[i];}</script>
+<div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
 </body></html>`;
 function fmtSize(n){if(!n)return "—";const u=["B","KB","MB","GB"];let i=0;while(n>=1024&&i<3){n/=1024;i++;}return n.toFixed(1)+" "+u[i];}
 
@@ -947,6 +954,49 @@ export class TunnelDO {
     this.ws = null;
     this.pending = new Map();
     this.expectBodyFor = null;
+    this._views = null;
+    this._viewsTotal = null;
+  }
+
+  dhakaDay() {
+    const d = new Date(Date.now() + 6 * 3600 * 1000);
+    return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0");
+  }
+
+  async bumpViews(request) {
+    const day = this.dhakaDay();
+    let v = this._views;
+    if (!v || v.day !== day) {
+      const s = await this.state.storage.get("views:" + day);
+      v = { day, hits: (s && s.hits) || 0, viewers: (s && s.viewers) || 0 };
+      this._views = v;
+    }
+    v.hits++;
+    const cookie = request.headers.get("Cookie") || "";
+    const seen = cookie.split(";").some((c) => c.trim() === "lv=" + day);
+    let setCookie = null;
+    if (!seen) { v.viewers++; setCookie = "lv=" + day + "; Path=/; Max-Age=90000; SameSite=Lax"; }
+    if (this._viewsTotal == null) this._viewsTotal = (await this.state.storage.get("views:total")) || 0;
+    this._viewsTotal++;
+    await this.state.storage.put("views:" + day, { hits: v.hits, viewers: v.viewers });
+    await this.state.storage.put("views:total", this._viewsTotal);
+    return { viewersToday: v.viewers, hitsToday: v.hits, total: this._viewsTotal, setCookie };
+  }
+
+  async pageResp(html, request) {
+    const s = await this.bumpViews(request);
+    const out = html.split("__VIEWS_TODAY__").join(String(s.viewersToday)).split("__VIEWS_TOTAL__").join(String(s.total));
+    const headers = { "content-type": "text/html;charset=utf-8" };
+    if (s.setCookie) headers["Set-Cookie"] = s.setCookie;
+    return new Response(out, { headers });
+  }
+
+  async viewsSnapshot() {
+    const day = this.dhakaDay();
+    let v = this._views;
+    if (!v || v.day !== day) v = await this.state.storage.get("views:" + day);
+    const total = this._viewsTotal != null ? this._viewsTotal : (await this.state.storage.get("views:total")) || 0;
+    return { viewersToday: (v && v.viewers) || 0, hitsToday: (v && v.hits) || 0, totalHits: total };
   }
 
   onWsMessage(event) {
@@ -1044,7 +1094,7 @@ export class TunnelDO {
 
     try {
       if (path === "/" || path === "/index.html")
-        return new Response(PAGE, { headers: { "content-type": "text/html;charset=utf-8" } });
+        return this.pageResp(PAGE, request);
       if (path === "/admin" || path === "/admin.html")
         return new Response(ADMIN_PAGE, { headers: { "content-type": "text/html;charset=utf-8" } });
       if (path === "/ads.txt")
@@ -1342,7 +1392,7 @@ export class TunnelDO {
             }
           }
         }
-        return json({ tunnel: this.ws ? "up" : "down", buckets: buckets.length, files, used, total: 53687091200 });
+        return json({ tunnel: this.ws ? "up" : "down", buckets: buckets.length, files, used, total: 53687091200, views: await this.viewsSnapshot() });
       }
       if (path === "/api/admin/object" && request.method === "DELETE") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
@@ -1411,12 +1461,12 @@ export class TunnelDO {
         const extObj = await getExtMovies(env);
         const m = extObj[id];
         if (!m) return new Response("not found", { status: 404 });
-        return new Response(EXT_VIEW_PAGE(m), { headers: { "content-type": "text/html;charset=utf-8" } });
+        return this.pageResp(EXT_VIEW_PAGE(m), request);
       }
       if (path.startsWith("/view/") && request.method === "GET") {
         const [, , bucket, ...keyParts] = path.split("/");
         const key = keyParts.map(decodeURIComponent).join("/");
-        return new Response(VIEW_PAGE(bucket, key, mediaKind(key)), { headers: { "content-type": "text/html;charset=utf-8" } });
+        return this.pageResp(VIEW_PAGE(bucket, key, mediaKind(key)), request);
       }
       if (path.startsWith("/dl/") && request.method === "GET") {
         const [, , bucket, ...keyParts] = path.split("/");
@@ -1425,7 +1475,7 @@ export class TunnelDO {
         const lr = await this.s3fetch("GET", "/" + bucket, { query: "list-type=2&prefix=" + key.split("/").map(encodeURIComponent).join("/") + "&max-keys=1" });
         let size = 0;
         if (lr.status < 400) { const m = bufToText(lr.body).match(/<Size>(\d+)<\/Size>/); if (m) size = parseInt(m[1]); }
-        return new Response(DL_PAGE(bucket, key, size), { headers: { "content-type": "text/html;charset=utf-8" } });
+        return this.pageResp(DL_PAGE(bucket, key, size), request);
       }
       if (path.startsWith("/d/") && request.method === "GET") {
         const [, , bucket, ...keyParts] = path.split("/");
