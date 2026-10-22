@@ -506,28 +506,38 @@ async function startR2Upload(){
     }
     upTimer=setInterval(renderStats,1000);
     renderStats();
-    for(let i=1;i<=nparts;i++){
-      const bsize=Math.min(file.size,i*PART)-(i-1)*PART;
-      if(doneNums[i]){ sent+=bsize; continue; }
-      if(r2up.cancelled) throw new Error("cancelled");
-      const blob=file.slice((i-1)*PART,Math.min(file.size,i*PART));
-      let part=null,lastErr=null;
-      for(let attempt=0;attempt<3&&!part;attempt++){
-        try{
-          const r=await (await api("/api/admin/r2/part?key="+encodeURIComponent(key)+"&uploadId="+encodeURIComponent(r2up.uploadId)+"&part="+i+"&pw="+encodeURIComponent(pw()),{method:"PUT",body:blob})).json();
-          if(r.ok) part=r; else lastErr=new Error(r.error||"part failed");
-        }catch(e){ lastErr=e; }
+    sent=upBase;
+    const todoParts=[];
+    for(let i=1;i<=nparts;i++){ if(!doneNums[i]) todoParts.push(i); }
+    let nextIdx=0, failMsg=null;
+    async function upWorker(){
+      while(!failMsg && !r2up.cancelled){
+        const idx=nextIdx++; if(idx>=todoParts.length) return;
+        const i=todoParts[idx];
+        const blob=file.slice((i-1)*PART,Math.min(file.size,i*PART));
+        let part=null,lastErr=null;
+        for(let attempt=0;attempt<3&&!part;attempt++){
+          try{
+            const r=await (await api("/api/admin/r2/part?key="+encodeURIComponent(key)+"&uploadId="+encodeURIComponent(r2up.uploadId)+"&part="+i+"&pw="+encodeURIComponent(pw()),{method:"PUT",body:blob})).json();
+            if(r.ok) part=r; else lastErr=new Error(r.error||"part failed");
+          }catch(e){ lastErr=e; }
+        }
+        if(!part){ failMsg="part "+i+" would not go through ("+(lastErr?lastErr.message:"network error")+")"; return; }
+        r2up.parts.push({partNumber:part.partNumber,etag:part.etag});
+        r2up.parts.sort(function(a,b){return a.partNumber-b.partNumber;});
+        upSave();
+        sent+=blob.size;
+        const pct=Math.round(sent/file.size*100);
+        bar.style.width=pct+"%";
+        sampleStats();
+        st.textContent="Uploading… "+pct+"% ("+r2up.parts.length+"/"+nparts+" parts, "+fmt(sent)+" of "+fmt(file.size)+"). Progress is saved — a crash won't restart you from zero.";
       }
-      if(!part){ pausedMsg="part "+i+" would not go through ("+(lastErr?lastErr.message:"network error")+")"; throw new Error("__paused__"); }
-      r2up.parts.push({partNumber:part.partNumber,etag:part.etag});
-      r2up.parts.sort(function(a,b){return a.partNumber-b.partNumber;});
-      upSave();
-      sent+=blob.size;
-      const pct=Math.round(sent/file.size*100);
-      bar.style.width=pct+"%";
-      sampleStats();
-      st.textContent="Uploading… "+pct+"% (part "+i+"/"+nparts+", "+fmt(sent)+" of "+fmt(file.size)+"). Progress is saved — a crash won't restart you from zero.";
     }
+    const CONC=Math.min(4,todoParts.length);
+    const workers=[];
+    for(let w=0;w<CONC;w++) workers.push(upWorker());
+    await Promise.all(workers);
+    if(failMsg){ pausedMsg=failMsg; throw new Error("__paused__"); }
     if(r2up.cancelled) throw new Error("cancelled");
     r2up.parts.sort(function(a,b){return a.partNumber-b.partNumber;});
     const done=await (await api("/api/admin/r2/complete?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:key,uploadId:r2up.uploadId,parts:r2up.parts})})).json();
