@@ -947,10 +947,12 @@ export class TunnelDO {
       this._views = v;
     }
     v.hits++;
+    const ua = (request.headers.get("User-Agent") || "").toLowerCase();
+    const isBot = !ua || /bot|crawl|spider|slurp|mediapartners|adsbot|facebookexternalhit|telegrambot|headless|curl|wget|python|go-http-client|java\/|libwww|scrapy|aiohttp|node-fetch|axios/.test(ua);
     const cookie = request.headers.get("Cookie") || "";
     const seen = cookie.split(";").some((c) => c.trim() === "lv=" + day);
     let setCookie = null;
-    if (!seen) { v.viewers++; setCookie = "lv=" + day + "; Path=/; Max-Age=90000; SameSite=Lax"; }
+    if (!seen && !isBot) { v.viewers++; setCookie = "lv=" + day + "; Path=/; Max-Age=90000; SameSite=Lax"; }
     if (this._viewsTotal == null) this._viewsTotal = (await this.state.storage.get("views:total")) || 0;
     this._viewsTotal++;
     await this.state.storage.put("views:" + day, { hits: v.hits, viewers: v.viewers });
