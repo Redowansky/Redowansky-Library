@@ -936,11 +936,56 @@ export class TunnelDO {
   constructor(state, env) {
     this.state = state;
     this.env = env;
-    this.ws = null;
+    // NOTE: no this.ws field anymore — see tunnelWs() (Hibernation API).
     this.pending = new Map();
     this.expectBodyFor = null;
     this._views = null;
     this._viewsTotal = null;
+  }
+
+  // --- WebSocket Hibernation API (migrated 2026-10-23, Redowan's call) ---
+  // The s3d tunnel socket is accepted via state.acceptWebSocket(), so this
+  // DO can HIBERNATE while the tunnel stays connected — no duration billing
+  // while idle. The old plain server.accept() billed duration for the
+  // socket's ENTIRE connected life (~10,800 GB-s/day against a 13,000/day
+  // free budget — the 2026-10-23 account-wide DO limit incident). The
+  // socket is never kept in a field (in-memory state is wiped on
+  // hibernation); it is recovered from state.getWebSockets("tunnel").
+  // WS messages/closes arrive via webSocketMessage/webSocketClose below,
+  // which also wake the DO after a hibernation. In-flight s3fetch state
+  // (this.pending / this.expectBodyFor) only exists while a fetch handler
+  // is actively awaiting, and the DO does not hibernate mid-request, so it
+  // never needs to survive a wake.
+  tunnelWs() {
+    try {
+      const socks = this.state.getWebSockets("tunnel");
+      return socks.length ? socks[socks.length - 1] : null;
+    } catch (e) { return null; }
+  }
+
+  async webSocketMessage(ws, message) {
+    this.onWsMessage({ data: message });
+  }
+
+  async webSocketClose(ws, code, reason, wasClean) {
+    // If a replacement tunnel socket is already live, the pending map
+    // belongs to the new connection — leave it alone.
+    let others = [];
+    try { others = this.state.getWebSockets("tunnel").filter((s) => s !== ws); } catch (e) {}
+    if (!others.length) {
+      for (const [id, p] of this.pending) { this.pending.delete(id); p.reject(new Error("tunnel closed")); }
+      this.expectBodyFor = null;
+    }
+    try { ws.close(code || 1000, reason || ""); } catch (e) {}
+  }
+
+  async webSocketError(ws, err) {
+    let others = [];
+    try { others = this.state.getWebSockets("tunnel").filter((s) => s !== ws); } catch (e) {}
+    if (!others.length) {
+      for (const [id, p] of this.pending) { this.pending.delete(id); p.reject(new Error("tunnel error")); }
+      this.expectBodyFor = null;
+    }
   }
 
   dhakaDay() {
@@ -1011,7 +1056,8 @@ export class TunnelDO {
   }
 
   async s3fetch(method, path, { query = "", headers = {}, body = null, unsignedPayload = false } = {}) {
-    if (!this.ws) {
+    const ws = this.tunnelWs();
+    if (!ws) {
       const e = new Error("storage gateway is offline (tunnel down)");
       e.code = 502;
       throw e;
@@ -1030,8 +1076,8 @@ export class TunnelDO {
       }, 180000);
     });
     try {
-      this.ws.send(JSON.stringify({ t: "req", id, method, path: path + (query ? "?" + query : ""), headers: h }));
-      this.ws.send(bodyBytes || new Uint8Array(0));
+      ws.send(JSON.stringify({ t: "req", id, method, path: path + (query ? "?" + query : ""), headers: h }));
+      ws.send(bodyBytes || new Uint8Array(0));
     } catch (e) {
       this.pending.delete(id);
       throw e;
@@ -1049,25 +1095,22 @@ export class TunnelDO {
         return new Response("expected websocket", { status: 426 });
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
-      server.accept();
-      if (this.ws) { try { this.ws.close(1012, "replaced"); } catch {} }
+      // Hibernation API: state.acceptWebSocket(), NOT server.accept() —
+      // plain accept() pins the DO in memory and bills duration for the
+      // connection's whole life. Message/close handling lives in the
+      // webSocketMessage/webSocketClose class methods above.
+      const old = this.tunnelWs();
+      if (old) { try { old.close(1012, "replaced"); } catch {} }
       for (const [, p] of this.pending) p.reject(new Error("tunnel replaced"));
       this.pending.clear();
       this.expectBodyFor = null;
-      this.ws = server;
-      server.addEventListener("message", (e) => this.onWsMessage(e));
-      const ws = server;
-      server.addEventListener("close", () => {
-        if (this.ws === ws) this.ws = null;
-        for (const [id, p] of this.pending) { this.pending.delete(id); p.reject(new Error("tunnel closed")); }
-      });
-      server.addEventListener("error", () => { if (this.ws === ws) this.ws = null; });
+      this.state.acceptWebSocket(server, ["tunnel"]);
       server.send(JSON.stringify({ t: "hello" }));
       return new Response(null, { status: 101, webSocket: client });
     }
 
     if (path === "/__health") {
-      return json({ tunnel: this.ws ? "up" : "down" });
+      return json({ tunnel: this.tunnelWs() ? "up" : "down" });
     }
 
     if (path === "/ads.txt") {
@@ -1379,7 +1422,7 @@ export class TunnelDO {
             }
           }
         }
-        return json({ tunnel: this.ws ? "up" : "down", buckets: buckets.length, files, used, total: 53687091200, views: await this.viewsSnapshot() });
+        return json({ tunnel: this.tunnelWs() ? "up" : "down", buckets: buckets.length, files, used, total: 53687091200, views: await this.viewsSnapshot() });
       }
       if (path === "/api/admin/object" && request.method === "DELETE") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Deploy the sia-lab Worker (with Durable Object binding) via the API."""
+"""Deploy the sia-lab Worker (with Durable Object binding) via the API.
+Deploy log:
+  2026-10-23 TunnelDO migrated to the WebSocket Hibernation API
+  (state.acceptWebSocket) so the DO stops billing duration while idle —
+  DO idFromName("main-v35"), TUNNEL_DO/DATA_KV/MEDIA bindings confirmed unchanged.
+"""
 import json
 import sys
 import urllib.request
