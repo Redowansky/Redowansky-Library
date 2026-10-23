@@ -76,7 +76,7 @@ const json = (obj, status = 200) =>
 const bufToText = (buf) => new TextDecoder().decode(buf);
 
 // ---- PAGE (public read-only library) ----
-const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="mnd-ver" content="gjfr65hhptrjchm0g4gugw" /><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script>
+const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="mnd-ver" content="gjfr65hhptrjchm0g4gugw" /><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script><script async src="https://ss.mrmnd.com/banner.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Redowansky's Library — Movies & Songs</title>
 <style>
@@ -154,6 +154,7 @@ section.row{padding:0 12px}
 <div class="hero" id="hero" style="display:none"><div class="hero-bg" id="hbg"></div><div class="hero-grad"></div>
 <div class="hero-info"><h1 id="ht"></h1><div class="hero-meta" id="hm"></div><p id="ho"></p>
 <div class="hero-btns"><a class="btn btn-play" id="hp" href="#">▶ Play</a><button class="btn btn-info" id="hi">ⓘ More Info</button></div></div></div>
+<div class="browse-ad" style="display:flex;justify-content:center;padding:18px 10px 2px"><div data-mndbanid="e7f1fcbf-d6f7-4ef5-afe1-b2005cc6e66c"></div></div>
 <main id="main" style="padding-top:20px"></main>
 <div class="modal" id="modal"><div class="modal-box"><button class="modal-x" onclick="closeModal()">✕</button>
 <div class="modal-hero" id="mhero"><div class="mg"></div></div><div class="modal-info" id="minfo"></div></div></div>
