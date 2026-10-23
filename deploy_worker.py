@@ -27,6 +27,7 @@ metadata = {
         {"type": "durable_object_namespace", "name": "TUNNEL_DO", "class_name": "TunnelDO"},
         {"type": "kv_namespace", "name": "DATA_KV", "namespace_id": "1d03652f9f5f4dceb8f276abbb95d4a2"},
         {"type": "r2_bucket", "name": "MEDIA", "bucket_name": "media"},
+        {"type": "send_email", "name": "MAILER", "destination_address": "hi@redowansky.cyou"},
     ],
     # migrations only needed once (class already created); omit on updates
 }

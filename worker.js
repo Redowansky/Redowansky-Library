@@ -1,3 +1,4 @@
+import { EmailMessage } from "cloudflare:email";
 // Sia Lab — file browser for the Sia storage backend (s3d).
 // A Durable Object holds the single reverse-tunnel WebSocket (the s3d host
 // dials OUT to /__tunnel); all requests route through it so any edge
@@ -1215,6 +1216,27 @@ export class TunnelDO {
         ip: request.headers.get("CF-Connecting-IP") || "",
       };
       const key = "requests:" + rec.ts + ":" + Math.random().toString(36).slice(2, 8);
+      // Forward to the library mailbox via the MAILER send_email binding
+      // (destination verified in Cloudflare Email Routing). The outcome is
+      // stored on the record itself, so delivery is auditable from KV.
+      if (env.MAILER) {
+        try {
+          const when = new Date(rec.ts).toISOString();
+          const raw =
+            "From: Redowansky Library <requests@redowansky.bond>\r\n" +
+            "To: hi@redowansky.cyou\r\n" +
+            "Subject: " + ("[Library] Movie request: " + rec.title).replace(/[\r\n]+/g, " ") + "\r\n" +
+            "Content-Type: text/plain; charset=utf-8\r\n\r\n" +
+            "New movie request from the Redowansky Library app.\n\n" +
+            "Movie: " + rec.title + "\n" +
+            "Requested by: " + rec.name + (rec.email ? " <" + rec.email + ">" : "") + "\n" +
+            "When: " + when + "\n";
+          await env.MAILER.send(new EmailMessage("requests@redowansky.bond", "hi@redowansky.cyou", raw));
+          rec.mail = "sent";
+        } catch (e) {
+          rec.mailError = String(e && e.message || e).slice(0, 200);
+        }
+      }
       await env.DATA_KV.put(key, JSON.stringify(rec));
       return json({ ok: true });
     }
