@@ -325,7 +325,7 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <div class="card"><div class="v" id="st-tunnel">…</div><div class="l">Tunnel</div></div>
 <div class="card"><div class="v" id="st-buckets">…</div><div class="l">Shelves</div></div>
 <div class="card"><div class="v" id="st-files">…</div><div class="l">Files</div></div>
-<div class="card"><div class="v" id="st-viewers">…</div><div class="l">👀 Viewers today</div></div>
+<div class="card"><div class="v" id="st-viewers">…</div><div class="l">👀 Visits today · GoatCounter</div></div>
 <div class="card"><div class="v" id="st-visits">…</div><div class="l">Visits today</div></div>
 <div class="card"><div class="v" id="st-total">…</div><div class="l">Total visits</div></div>
 </div>
@@ -720,6 +720,7 @@ const d=await r.json();
 $("st-tunnel").textContent=d.tunnel==="up"?"● UP":"● DOWN";$("st-tunnel").style.color=d.tunnel==="up"?"var(--grn)":"var(--red)";
 $("st-buckets").textContent=d.buckets;$("st-files").textContent=d.files;
 if(d.views){$("st-viewers").textContent=d.views.viewersToday;$("st-visits").textContent=d.views.hitsToday;$("st-total").textContent=d.views.totalHits;}
+try{const dk2=function(off){return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Dhaka",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(Date.now()+off*864e5));};const gj=await(await fetch("https://redowansky.goatcounter.com/counter/TOTAL.json?start="+dk2(0)+"&end="+dk2(1))).json();if(gj&&gj.count!=null)$("st-viewers").textContent=String(gj.count).replace(/,/g,"");}catch(e){}
 const pct=d.total?Math.min(100,d.used/d.total*100):0;
 $("gring").style.strokeDashoffset=402-(402*pct/100);$("gpct").textContent=pct.toFixed(1)+"%";
 $("gused").textContent=fmt(d.used);$("gfree").textContent=fmt(d.total-d.used);$("gtotal").textContent=fmt(d.total);}
@@ -1017,7 +1018,10 @@ export class TunnelDO {
 
   async pageResp(html, request) {
     const s = await this.bumpViews(request);
-    const out = html.split("__VIEWS_TODAY__").join(String(s.viewersToday)).split("__VIEWS_TOTAL__").join(String(s.total));
+    let out = html.split("👀 __VIEWS_TODAY__ viewers today").join('👀 <span class="gcN">–</span> visits today').split("__VIEWS_TOTAL__").join(String(s.total));
+    const gc = '<script data-goatcounter="https://redowansky.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>'
+      + '<script>(function(){function dk(off){return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Dhaka",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(Date.now()+off*864e5));}fetch("https://redowansky.goatcounter.com/counter/TOTAL.json?start="+dk(0)+"&end="+dk(1)).then(function(r){return r.json();}).then(function(j){if(j&&j.count!=null){var n=String(j.count).replace(/,/g,"");var es=document.querySelectorAll(".gcN");for(var i=0;i<es.length;i++){es[i].textContent=n;}}}).catch(function(){});})();</script>';
+    if (out.indexOf("</body>") >= 0) out = out.replace("</body>", gc + "</body>"); else out += gc;
     const headers = { "content-type": "text/html;charset=utf-8" };
     if (s.setCookie) headers["Set-Cookie"] = s.setCookie;
     return new Response(out, { headers });
