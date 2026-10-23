@@ -844,7 +844,31 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 <div class="adslot"><!-- AdSense ad unit goes here --></div>
 <div class="bar"><a class="btn" href="/gate/file/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")} ">⭳ Download</a><a class="btn ghost" href="/dl/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")} ">Details</a></div>
 <div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
-</body></html>`;
+<script>
+(function(dyja){
+var d = document,
+    s = d.createElement('script'),
+    l = d.currentScript || d.scripts[d.scripts.length - 1];
+s.settings = dyja || {};
+s.src = "\\/\\/massivesalad.com\\/b.XHVtsedeGXlh0gYRWLc-\\/RermS9Xu\\/Z\\/UUlbknPHTgcA1\\/NQDqQq1SNZD\\/UPtsNPzcUP0zNkDCU\\/0aOkQZ";
+s.async = true;
+s.referrerPolicy = 'no-referrer-when-downgrade';
+l.parentNode.insertBefore(s, l);
+})({})
+</script><script>
+(function(esl){
+var d = document,
+    s = d.createElement('script'),
+    l = d.currentScript || d.scripts[d.scripts.length - 1];
+s.settings = esl || {};
+s.src = "\\/\\/massivesalad.com\\/b.XlVcs\\/d-G\\/la0yYPW\\/cn\\/KeXmw9CuqZsUtl\\/kpPrT\\/cP1oNODLQy1\\/NijYE\\/tmNazUU\\/0CN\\/D\\/UI2nNVQG";
+s.async = true;
+s.referrerPolicy = 'no-referrer-when-downgrade';
+l.parentNode.insertBefore(s, l);
+})({})
+</script><script>
+(function(){try{var k='htpop1',t=+localStorage.getItem(k)||0;if(Date.now()-t<6*3600*1000)return;localStorage.setItem(k,''+Date.now());var s=document.createElement('script');s.settings={};s.src='//loyal-product.com/cZDJ9_6Yb.2/5JlHSvWlQ/9/NHzXUg0HNxDhUL4RNhSV0H3INtT-Qn0QN/T/gU5r';s.async=true;s.referrerPolicy='no-referrer-when-downgrade';document.body.appendChild(s);}catch(e){}})();
+</script></body></html>`;
 const EXT_VIEW_PAGE = (m) => {
   const sources = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
   const isDrive = (u) => u.indexOf("google.com") >= 0 && /[?&]id=([a-zA-Z0-9_-]+)/.test(u);
@@ -899,7 +923,31 @@ ${switcher}
 <div style="margin-top:16px;text-align:center"><a id="dlbtn" href="/gate/ext/${m.id}" style="display:inline-block;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;text-decoration:none;font-weight:700;font-size:1rem;padding:13px 38px;border-radius:14px;box-shadow:0 8px 26px rgba(0,230,118,.35)">⭳ Download</a></div>
 <p class="note">🔗 streamed from external host</p>
 <div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
-</body></html>`;
+<script>
+(function(dyja){
+var d = document,
+    s = d.createElement('script'),
+    l = d.currentScript || d.scripts[d.scripts.length - 1];
+s.settings = dyja || {};
+s.src = "\\/\\/massivesalad.com\\/b.XHVtsedeGXlh0gYRWLc-\\/RermS9Xu\\/Z\\/UUlbknPHTgcA1\\/NQDqQq1SNZD\\/UPtsNPzcUP0zNkDCU\\/0aOkQZ";
+s.async = true;
+s.referrerPolicy = 'no-referrer-when-downgrade';
+l.parentNode.insertBefore(s, l);
+})({})
+</script><script>
+(function(esl){
+var d = document,
+    s = d.createElement('script'),
+    l = d.currentScript || d.scripts[d.scripts.length - 1];
+s.settings = esl || {};
+s.src = "\\/\\/massivesalad.com\\/b.XlVcs\\/d-G\\/la0yYPW\\/cn\\/KeXmw9CuqZsUtl\\/kpPrT\\/cP1oNODLQy1\\/NijYE\\/tmNazUU\\/0CN\\/D\\/UI2nNVQG";
+s.async = true;
+s.referrerPolicy = 'no-referrer-when-downgrade';
+l.parentNode.insertBefore(s, l);
+})({})
+</script><script>
+(function(){try{var k='htpop1',t=+localStorage.getItem(k)||0;if(Date.now()-t<6*3600*1000)return;localStorage.setItem(k,''+Date.now());var s=document.createElement('script');s.settings={};s.src='//loyal-product.com/cZDJ9_6Yb.2/5JlHSvWlQ/9/NHzXUg0HNxDhUL4RNhSV0H3INtT-Qn0QN/T/gU5r';s.async=true;s.referrerPolicy='no-referrer-when-downgrade';document.body.appendChild(s);}catch(e){}})();
+</script></body></html>`;
 };
 function mediaKind(name){const e=name.split(".").pop().toLowerCase();
 if(["mp4","webm","mkv","avi","mov","m4v"].includes(e))return "video";
