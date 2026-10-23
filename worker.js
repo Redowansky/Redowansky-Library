@@ -75,7 +75,7 @@ const json = (obj, status = 200) =>
 const bufToText = (buf) => new TextDecoder().decode(buf);
 
 // ---- PAGE (public read-only library) ----
-const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="009842b3abdeb48557306ab6df08fe4a20d84e95" content="009842b3abdeb48557306ab6df08fe4a20d84e95" />
+const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="mnd-ver" content="gjfr65hhptrjchm0g4gugw" /><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Redowansky's Library — Movies & Songs</title>
 <style>
@@ -799,7 +799,7 @@ mp3:"audio/mpeg",ogg:"audio/ogg",wav:"audio/wav",m4a:"audio/mp4",flac:"audio/fla
 pdf:"application/pdf",txt:"text/plain",json:"application/json",zip:"application/zip"};return m[e]||"application/octet-stream";}
 
 // ---- Media viewer page ----
-const VIEW_PAGE = (bucket, key, kind) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+const VIEW_PAGE = (bucket, key, kind) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script async src="https://ss.mrmnd.com/banner.js"></script><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script><script async src="https://ss.mrmnd.com/interstitial.js" data-mndintid="206f947f-813c-4f71-aedc-ffd005412447"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${key.split("/").pop()} — Redowansky's Library</title>
 <style>
@@ -844,31 +844,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 <div class="adslot"><!-- AdSense ad unit goes here --></div>
 <div class="bar"><a class="btn" href="/gate/file/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")} ">⭳ Download</a><a class="btn ghost" href="/dl/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")} ">Details</a></div>
 <div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
-<script>
-(function(dyja){
-var d = document,
-    s = d.createElement('script'),
-    l = d.currentScript || d.scripts[d.scripts.length - 1];
-s.settings = dyja || {};
-s.src = "\\/\\/massivesalad.com\\/b.XHVtsedeGXlh0gYRWLc-\\/RermS9Xu\\/Z\\/UUlbknPHTgcA1\\/NQDqQq1SNZD\\/UPtsNPzcUP0zNkDCU\\/0aOkQZ";
-s.async = true;
-s.referrerPolicy = 'no-referrer-when-downgrade';
-l.parentNode.insertBefore(s, l);
-})({})
-</script><script>
-(function(esl){
-var d = document,
-    s = d.createElement('script'),
-    l = d.currentScript || d.scripts[d.scripts.length - 1];
-s.settings = esl || {};
-s.src = "\\/\\/massivesalad.com\\/b.XlVcs\\/d-G\\/la0yYPW\\/cn\\/KeXmw9CuqZsUtl\\/kpPrT\\/cP1oNODLQy1\\/NijYE\\/tmNazUU\\/0CN\\/D\\/UI2nNVQG";
-s.async = true;
-s.referrerPolicy = 'no-referrer-when-downgrade';
-l.parentNode.insertBefore(s, l);
-})({})
-</script><script>
-(function(){try{var k='htpop1',t=+localStorage.getItem(k)||0;if(Date.now()-t<6*3600*1000)return;localStorage.setItem(k,''+Date.now());var s=document.createElement('script');s.settings={};s.src='//loyal-product.com/cZDJ9_6Yb.2/5JlHSvWlQ/9/NHzXUg0HNxDhUL4RNhSV0H3INtT-Qn0QN/T/gU5r';s.async=true;s.referrerPolicy='no-referrer-when-downgrade';document.body.appendChild(s);}catch(e){}})();
-</script></body></html>`;
+<div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div></body></html>`;
 const EXT_VIEW_PAGE = (m) => {
   const sources = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
   const isDrive = (u) => u.indexOf("google.com") >= 0 && /[?&]id=([a-zA-Z0-9_-]+)/.test(u);
@@ -904,7 +880,7 @@ const EXT_VIEW_PAGE = (m) => {
       </script>`
     : "";
   const player = `<div id="extstage">${playerFor(sources[0].url)}</div>`;
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script async src="https://ss.mrmnd.com/banner.js"></script><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script><script async src="https://ss.mrmnd.com/interstitial.js" data-mndintid="206f947f-813c-4f71-aedc-ffd005412447"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${m.title} — Redowansky's Library</title>
 <style>
@@ -923,31 +899,7 @@ ${switcher}
 <div style="margin-top:16px;text-align:center"><a id="dlbtn" href="/gate/ext/${m.id}" style="display:inline-block;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;text-decoration:none;font-weight:700;font-size:1rem;padding:13px 38px;border-radius:14px;box-shadow:0 8px 26px rgba(0,230,118,.35)">⭳ Download</a></div>
 <p class="note">🔗 streamed from external host</p>
 <div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
-<script>
-(function(dyja){
-var d = document,
-    s = d.createElement('script'),
-    l = d.currentScript || d.scripts[d.scripts.length - 1];
-s.settings = dyja || {};
-s.src = "\\/\\/massivesalad.com\\/b.XHVtsedeGXlh0gYRWLc-\\/RermS9Xu\\/Z\\/UUlbknPHTgcA1\\/NQDqQq1SNZD\\/UPtsNPzcUP0zNkDCU\\/0aOkQZ";
-s.async = true;
-s.referrerPolicy = 'no-referrer-when-downgrade';
-l.parentNode.insertBefore(s, l);
-})({})
-</script><script>
-(function(esl){
-var d = document,
-    s = d.createElement('script'),
-    l = d.currentScript || d.scripts[d.scripts.length - 1];
-s.settings = esl || {};
-s.src = "\\/\\/massivesalad.com\\/b.XlVcs\\/d-G\\/la0yYPW\\/cn\\/KeXmw9CuqZsUtl\\/kpPrT\\/cP1oNODLQy1\\/NijYE\\/tmNazUU\\/0CN\\/D\\/UI2nNVQG";
-s.async = true;
-s.referrerPolicy = 'no-referrer-when-downgrade';
-l.parentNode.insertBefore(s, l);
-})({})
-</script><script>
-(function(){try{var k='htpop1',t=+localStorage.getItem(k)||0;if(Date.now()-t<6*3600*1000)return;localStorage.setItem(k,''+Date.now());var s=document.createElement('script');s.settings={};s.src='//loyal-product.com/cZDJ9_6Yb.2/5JlHSvWlQ/9/NHzXUg0HNxDhUL4RNhSV0H3INtT-Qn0QN/T/gU5r';s.async=true;s.referrerPolicy='no-referrer-when-downgrade';document.body.appendChild(s);}catch(e){}})();
-</script></body></html>`;
+<div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div></body></html>`;
 };
 function mediaKind(name){const e=name.split(".").pop().toLowerCase();
 if(["mp4","webm","mkv","avi","mov","m4v"].includes(e))return "video";
@@ -989,7 +941,7 @@ async function hmacHex(key, msg) {
   const s = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(msg));
   return [...new Uint8Array(s)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-const GATE_PAGE = (title, sub, desc, labels, src0) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+const GATE_PAGE = (title, sub, desc, labels, src0) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script async src="https://ss.mrmnd.com/banner.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Download ${title} — Redowansky's Library</title>
 <style>
@@ -1015,18 +967,7 @@ h1{font-size:1.25rem;margin-bottom:6px;word-break:break-word}
 <div class="ico">📥</div>
 <h1>${title}</h1>
 <div class="meta">${sub}</div>
-<div class="adslot" id="adslot"><script>
-(function(gkee){
-var d = document,
-    s = d.createElement('script'),
-    l = d.currentScript || d.scripts[d.scripts.length - 1];
-s.settings = gkee || {};
-s.src = "\\/\\/massivesalad.com\\/bEXvVEssd.GwlI0dYDWlct\\/ye\\/mj9UuUZtUqlkkKPLTQcD1MN\\/DAQt0YMMD\\/U\\/t_NkzvUb0\\/NyDZQ\\/woOWQl";
-s.async = true;
-s.referrerPolicy = 'no-referrer-when-downgrade';
-l.parentNode.insertBefore(s, l);
-})({})
-</script></div>
+<div class="adslot" id="adslot"><div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div></div>
 <div id="gateMain">
 <div class="srcs" id="srcs"></div>
 <div class="cd" id="cd">10</div>
