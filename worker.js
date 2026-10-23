@@ -1226,6 +1226,8 @@ export class TunnelDO {
             "From: Redowansky Library <requests@redowansky.bond>\r\n" +
             "To: hi@redowansky.cyou\r\n" +
             "Subject: " + ("[Library] Movie request: " + rec.title).replace(/[\r\n]+/g, " ") + "\r\n" +
+            "Date: " + new Date(rec.ts).toUTCString() + "\r\n" +
+            "Message-ID: <" + rec.ts + "." + Math.random().toString(36).slice(2, 10) + "@redowansky.bond>\r\n" +
             "Content-Type: text/plain; charset=utf-8\r\n\r\n" +
             "New movie request from the Redowansky Library app.\n\n" +
             "Movie: " + rec.title + "\n" +
