@@ -75,7 +75,7 @@ const json = (obj, status = 200) =>
 const bufToText = (buf) => new TextDecoder().decode(buf);
 
 // ---- PAGE (public read-only library) ----
-const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="009842b3abdeb48557306ab6df08fe4a20d84e95" content="009842b3abdeb48557306ab6df08fe4a20d84e95" />
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Redowansky's Library — Movies & Songs</title>
 <style>
@@ -967,7 +967,18 @@ h1{font-size:1.25rem;margin-bottom:6px;word-break:break-word}
 <div class="ico">📥</div>
 <h1>${title}</h1>
 <div class="meta">${sub}</div>
-<div class="adslot" id="adslot"><!--HILLTOP--></div>
+<div class="adslot" id="adslot"><script>
+(function(gkee){
+var d = document,
+    s = d.createElement('script'),
+    l = d.currentScript || d.scripts[d.scripts.length - 1];
+s.settings = gkee || {};
+s.src = "\\/\\/massivesalad.com\\/bEXvVEssd.GwlI0dYDWlct\\/ye\\/mj9UuUZtUqlkkKPLTQcD1MN\\/DAQt0YMMD\\/U\\/t_NkzvUb0\\/NyDZQ\\/woOWQl";
+s.async = true;
+s.referrerPolicy = 'no-referrer-when-downgrade';
+l.parentNode.insertBefore(s, l);
+})({})
+</script></div>
 <div id="gateMain">
 <div class="srcs" id="srcs"></div>
 <div class="cd" id="cd">10</div>
