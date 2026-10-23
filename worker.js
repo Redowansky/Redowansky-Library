@@ -1199,6 +1199,26 @@ export class TunnelDO {
       return json({ tunnel: this.tunnelWs() ? "up" : "down" });
     }
 
+    // App feature: "Ask for a movie". Requests land in DATA_KV as
+    // requests:<ts>:<rand> JSON {title,name,email,ts,ip}. The mailbox
+    // these get forwarded to lives only in this Worker, never in the app.
+    if (path === "/api/request" && request.method === "POST") {
+      let b = {};
+      try { b = await request.json(); } catch {}
+      const title = String(b.title || "").trim().slice(0, 200);
+      if (!title) return json({ ok: false, error: "title required" }, 400);
+      const rec = {
+        title,
+        name: String(b.name || "Guest").slice(0, 100),
+        email: String(b.email || "").slice(0, 120),
+        ts: Date.now(),
+        ip: request.headers.get("CF-Connecting-IP") || "",
+      };
+      const key = "requests:" + rec.ts + ":" + Math.random().toString(36).slice(2, 8);
+      await env.DATA_KV.put(key, JSON.stringify(rec));
+      return json({ ok: true });
+    }
+
 
     if (!env.S3_ACCESS_KEY || !env.S3_SECRET_KEY)
       return new Response("storage backend not configured", { status: 500 });
