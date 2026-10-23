@@ -203,7 +203,7 @@ function openModal(m){
   $('mhero').style.backgroundImage=m.backdrop?'url('+BG+m.backdrop+')':(m.poster&&m.poster.startsWith('http')?'url('+m.poster+')':'none');
   var genres=(m.genres||[]).map(function(g){return '<span>'+g+'</span>';}).join('');
   var vurl=m.external?'/view/ext/'+m.id:'/view/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
-  var durl=m.external?m.url:'/dl/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
+  var durl=m.external?'/gate/ext/'+m.id:'/dl/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
   $('minfo').innerHTML='<h2>'+m.title+'</h2><div class="mmeta"><span class="rate">★ '+(m.vote||'—')+'</span><span>'+(m.year||'')+'</span><span>'+(m.type==='song'?'Video Song':'Movie')+'</span></div><p>'+(m.overview||'No overview available.')+'</p><div class="genres">'+genres+'</div><div class="hero-btns"><a class="btn btn-play" href="'+vurl+'">▶ Play</a><a class="btn btn-info" href="'+durl+'">⭳ Download</a></div>';
   $('modal').classList.add('open');
 }
@@ -842,7 +842,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 : kind === "audio" ? `<audio controls preload="metadata" src="/d/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")}"></audio>`
 : `<p style="padding:40px;color:#7a9a85">Preview not available for this file type.</p>`}</div>
 <div class="adslot"><!-- AdSense ad unit goes here --></div>
-<div class="bar"><a class="btn" href="/d/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")} ">⭳ Download</a><a class="btn ghost" href="/dl/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")} ">Details</a></div>
+<div class="bar"><a class="btn" href="/gate/file/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")} ">⭳ Download</a><a class="btn ghost" href="/dl/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")} ">Details</a></div>
 <div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
 </body></html>`;
 const EXT_VIEW_PAGE = (m) => {
@@ -860,6 +860,8 @@ const EXT_VIEW_PAGE = (m) => {
       const SRCS = ${JSON.stringify(sources.map(s => s.url))};
       function setSrc(i){
         const stage = document.getElementById("extstage");
+        const db = document.getElementById("dlbtn");
+        if (db) db.href = "/gate/ext/${m.id}?src=" + i;
         const u = SRCS[i];
         const isD = u.indexOf("google.com") >= 0 && /[?&]id=/.test(u);
         if (isD) {
@@ -894,6 +896,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 <div class="top"><a href="/">← Library</a><h1>${m.title}</h1></div>
 ${switcher}
 <div class="stage">${player}</div>
+<div style="margin-top:16px;text-align:center"><a id="dlbtn" href="/gate/ext/${m.id}" style="display:inline-block;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;text-decoration:none;font-weight:700;font-size:1rem;padding:13px 38px;border-radius:14px;box-shadow:0 8px 26px rgba(0,230,118,.35)">⭳ Download</a></div>
 <p class="note">🔗 streamed from external host</p>
 <div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
 </body></html>`;
@@ -925,10 +928,89 @@ h1{font-size:1.3rem;margin-bottom:6px;word-break:break-all}
 <h1>${key.split("/").pop()}</h1>
 <div class="meta">${fmtSize(size)} · from the ${bucket} shelf</div>
 <div class="adslot" id="adslot"><!-- AdSense ad unit goes here --></div>
-<a class="btn" href="/d/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")}">⭳ Download</a><br>
+<a class="btn" href="/gate/file/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")}">⭳ Download</a><br>
 <a class="back" href="/">← back to library</a>
 </div>
-<script>function fmtSize(n){if(!n)return "—";const u=["B","KB","MB","GB"];let i=0;while(n>=1024&&i<3){n/=1024;i++;}return n.toFixed(1)+" "+u[i];}</script>
+<script>
+function fmtSize(n){if(!n)return "—";const u=["B","KB","MB","GB"];let i=0;while(n>=1024&&i<3){n/=1024;i++;}return n.toFixed(1)+" "+u[i];}</script>
+<div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
+</body></html>`;
+const TS_SITEKEY = "0x4AAAAAAFiP8oF_-Hz8Ev93";
+async function hmacHex(key, msg) {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const s = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(msg));
+  return [...new Uint8Array(s)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+const GATE_PAGE = (title, sub, desc, labels, src0) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Download ${title} — Redowansky's Library</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+.card{background:linear-gradient(180deg,#101b14,#0c1410);border:1px solid #1e3a2a;border-radius:20px;padding:36px 32px;max-width:480px;width:100%}
+.ico{font-size:3rem;margin-bottom:12px}
+h1{font-size:1.25rem;margin-bottom:6px;word-break:break-word}
+.meta{color:#7a9a85;font-size:.85rem;margin-bottom:20px}
+.adslot{background:#0a120c;border:1px dashed #1e3a2a;border-radius:12px;min-height:120px;display:flex;align-items:center;justify-content:center;color:#55556a;font-size:.8rem;margin-bottom:20px;padding:16px;overflow:hidden}
+.srcs{display:flex;gap:8px;justify-content:center;margin-bottom:18px;flex-wrap:wrap}
+.srcs button{padding:8px 18px;border-radius:20px;border:1px solid #2a5a3a;background:#122a1c;color:#e8f5e9;font-weight:600;cursor:pointer;font-size:.85rem}
+.srcs button.on{background:#00e676;color:#06130b}
+.cd{font-size:2rem;font-weight:800;color:#69f0ae;margin-bottom:6px}
+.status{color:#7a9a85;font-size:.88rem;min-height:1.2em;margin-bottom:16px}
+.tswrap{display:flex;justify-content:center;margin-bottom:18px;min-height:65px}
+.btn{display:inline-block;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;border:none;text-decoration:none;font-weight:700;font-size:1.05rem;padding:15px 44px;border-radius:14px;box-shadow:0 8px 26px rgba(0,230,118,.35);cursor:pointer}
+.btn[disabled]{background:#1c2b21;color:#5f7a68;box-shadow:none;cursor:not-allowed}
+.wall{display:none;background:#2a1215;border:1px solid #6e2a30;color:#ffb3ba;border-radius:12px;padding:18px;font-size:.92rem;line-height:1.5}
+.back{display:inline-block;margin-top:18px;color:#00e676;text-decoration:none;font-size:.9rem}
+</style></head><body>
+<div class="card">
+<div class="ico">📥</div>
+<h1>${title}</h1>
+<div class="meta">${sub}</div>
+<div class="adslot" id="adslot"><!--HILLTOP--></div>
+<div id="gateMain">
+<div class="srcs" id="srcs"></div>
+<div class="cd" id="cd">10</div>
+<div class="status" id="status">Preparing your download…</div>
+<div class="tswrap"><div class="cf-turnstile" data-sitekey="${TS_SITEKEY}" data-callback="tsOk"></div></div>
+<button class="btn" id="go" disabled>⭳ Download</button><br>
+<a class="back" href="/">← back to library</a>
+</div>
+<div class="wall" id="wall">🚫 <b>Adblock detected.</b><br>Downloads are free because ads pay for the library.<br>Please disable your adblocker for this site and refresh the page.</div>
+</div>
+<div id="bait" class="ad adsbox ad-banner pub_300x250" style="height:1px;font-size:1px;line-height:1px">&nbsp;</div>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<script>
+var DESC=${JSON.stringify(desc)};
+var LABELS=${JSON.stringify(labels)};
+var curSrc=${src0 || 0},left=10,cdDone=false,tsToken=null,blocked=false,busy=false;
+var goBtn=document.getElementById("go"),st=document.getElementById("status"),cdEl=document.getElementById("cd");
+var srcsEl=document.getElementById("srcs");
+if(LABELS.length>1){LABELS.forEach(function(l,i){var b=document.createElement("button");b.textContent=l;if(i===curSrc)b.className="on";b.onclick=function(){curSrc=i;var bs=srcsEl.querySelectorAll("button");for(var j=0;j<bs.length;j++)bs[j].className=(j===i?"on":"");};srcsEl.appendChild(b);});}
+function tsOk(t){tsToken=t;tryEnable();}
+function tryEnable(){
+  if(blocked)return;
+  if(cdDone&&tsToken){goBtn.disabled=false;st.textContent="Ready — your link expires 5 minutes after you click.";}
+  else if(cdDone){st.textContent="Complete the human check above to unlock the download.";}
+}
+setTimeout(function(){
+  var bait=document.getElementById("bait");
+  var hidden=!bait||bait.offsetHeight===0||bait.offsetParent===null;
+  if(!hidden){var cs=getComputedStyle(bait);if(cs.display==="none"||cs.visibility==="hidden")hidden=true;}
+  if(hidden){blocked=true;document.getElementById("gateMain").style.display="none";document.getElementById("wall").style.display="block";}
+},1500);
+var timer=setInterval(function(){
+  left--;if(left<=0){left=0;clearInterval(timer);cdDone=true;cdEl.textContent="✓";tryEnable();}
+  else cdEl.textContent=left;
+},1000);
+goBtn.onclick=function(){
+  if(busy||goBtn.disabled)return;busy=true;goBtn.textContent="Checking…";
+  fetch("/api/gate/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({desc:DESC,src:curSrc,token:tsToken})})
+  .then(function(r){return r.json();})
+  .then(function(j){if(j&&j.go){location.href=j.go;}else{busy=false;goBtn.textContent="⭳ Download";st.textContent="❌ "+((j&&j.error)||"verification failed — refresh and try again.");}})
+  .catch(function(){busy=false;goBtn.textContent="⭳ Download";st.textContent="❌ Network error — refresh and try again.";});
+};
+</script>
 <div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
 </body></html>`;
 function fmtSize(n){if(!n)return "—";const u=["B","KB","MB","GB"];let i=0;while(n>=1024&&i<3){n/=1024;i++;}return n.toFixed(1)+" "+u[i];}
@@ -1494,6 +1576,82 @@ export class TunnelDO {
         const [, , bucket, ...keyParts] = path.split("/");
         const key = keyParts.map(decodeURIComponent).join("/");
         return this.pageResp(VIEW_PAGE(bucket, key, mediaKind(key)), request);
+      }
+      if (path.startsWith("/gate/ext/") && request.method === "GET") {
+        const id = decodeURIComponent(path.split("/")[3] || "");
+        const extObj = await getExtMovies(env);
+        const m = extObj[id];
+        if (!m) return new Response("not found", { status: 404 });
+        const srcs = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
+        const labels = srcs.map((s) => s.label || "Download");
+        let src0 = parseInt(url.searchParams.get("src") || "0", 10);
+        if (!(src0 >= 0 && src0 < srcs.length)) src0 = 0;
+        const sub = [m.year, m.type === "song" ? "Video Song" : "Movie"].filter(Boolean).join(" · ");
+        return this.pageResp(GATE_PAGE(m.title || "Download", sub, { kind: "ext", id }, labels, src0), request);
+      }
+      if (path.startsWith("/gate/file/") && request.method === "GET") {
+        const [, , , bucket, ...keyParts] = path.split("/");
+        const key = keyParts.map(decodeURIComponent).join("/");
+        if (!bucket || !key) return new Response("not found", { status: 404 });
+        return this.pageResp(GATE_PAGE(key.split("/").pop(), "from the " + bucket + " shelf", { kind: "file", bucket, key }, ["Download"], 0), request);
+      }
+      if (path === "/api/gate/verify" && request.method === "POST") {
+        let body;
+        try { body = await request.json(); } catch (e) { return json({ error: "bad request" }, 400); }
+        const desc = body.desc || {};
+        const src = parseInt(body.src || "0", 10) || 0;
+        if (!env.TURNSTILE_SECRET) return json({ error: "gate is not configured yet" }, 503);
+        if (!body.token) return json({ error: "human check missing — wait for it and try again" }, 400);
+        const form = new URLSearchParams();
+        form.set("secret", env.TURNSTILE_SECRET);
+        form.set("response", String(body.token));
+        const rip = request.headers.get("CF-Connecting-IP");
+        if (rip) form.set("remoteip", rip);
+        let tv;
+        try {
+          const tr = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: form });
+          tv = await tr.json();
+        } catch (e) { return json({ error: "human check unreachable — try again" }, 502); }
+        if (!tv || !tv.success) return json({ error: "human check failed — refresh and try again" }, 403);
+        let target = null;
+        if (desc.kind === "ext") {
+          const extObj = await getExtMovies(env);
+          const m = extObj[desc.id];
+          if (!m) return json({ error: "not found" }, 404);
+          const srcs = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
+          if (!(src >= 0 && src < srcs.length)) return json({ error: "bad source" }, 400);
+          target = { kind: "ext", id: desc.id, src };
+        } else if (desc.kind === "file") {
+          if (!desc.bucket || !desc.key) return json({ error: "bad target" }, 400);
+          target = { kind: "file", bucket: desc.bucket, key: desc.key, src: 0 };
+        } else return json({ error: "bad target" }, 400);
+        target.exp = Math.floor(Date.now() / 1000) + 300;
+        const payload = btoa(unescape(encodeURIComponent(JSON.stringify(target)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        const sig = await hmacHex(env.UPLOAD_KEY || "", payload);
+        return json({ go: "/go/" + payload + "." + sig });
+      }
+      if (path.startsWith("/go/") && request.method === "GET") {
+        const seg = path.slice(4);
+        const dot = seg.lastIndexOf(".");
+        if (dot < 1) return new Response("bad link", { status: 400 });
+        const payload = seg.slice(0, dot), sig = seg.slice(dot + 1);
+        const want = await hmacHex(env.UPLOAD_KEY || "", payload);
+        if (sig !== want) return new Response("invalid link", { status: 403 });
+        let t;
+        try { t = JSON.parse(decodeURIComponent(escape(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))))); } catch (e) { return new Response("bad link", { status: 400 }); }
+        if (!t.exp || t.exp < Math.floor(Date.now() / 1000)) return new Response("link expired — go back and click download again", { status: 410 });
+        if (t.kind === "ext") {
+          const extObj = await getExtMovies(env);
+          const m = extObj[t.id];
+          if (!m) return new Response("not found", { status: 404 });
+          const srcs = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
+          const s = srcs[t.src || 0] || srcs[0];
+          return Response.redirect(s.url, 302);
+        }
+        if (t.kind === "file") {
+          return Response.redirect("/d/" + encodeURIComponent(t.bucket) + "/" + t.key.split("/").map(encodeURIComponent).join("/"), 302);
+        }
+        return new Response("bad link", { status: 400 });
       }
       if (path.startsWith("/dl/") && request.method === "GET") {
         const [, , bucket, ...keyParts] = path.split("/");
