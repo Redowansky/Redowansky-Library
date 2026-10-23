@@ -75,7 +75,7 @@ const json = (obj, status = 200) =>
 const bufToText = (buf) => new TextDecoder().decode(buf);
 
 // ---- PAGE (public read-only library) ----
-const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1642095506798662" crossorigin="anonymous"></script>
+const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Redowansky's Library — Movies & Songs</title>
 <style>
@@ -241,7 +241,7 @@ function cleanTitle(filename){
 }
 
 // ---- Admin upload page (private, password via ?pw= or prompt) ----
-const ADMIN_PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1642095506798662" crossorigin="anonymous"></script>
+const ADMIN_PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dashboard — Redowansky's Library</title>
 <style>
@@ -799,7 +799,7 @@ mp3:"audio/mpeg",ogg:"audio/ogg",wav:"audio/wav",m4a:"audio/mp4",flac:"audio/fla
 pdf:"application/pdf",txt:"text/plain",json:"application/json",zip:"application/zip"};return m[e]||"application/octet-stream";}
 
 // ---- Media viewer page ----
-const VIEW_PAGE = (bucket, key, kind) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1642095506798662" crossorigin="anonymous"></script>
+const VIEW_PAGE = (bucket, key, kind) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${key.split("/").pop()} — Redowansky's Library</title>
 <style>
@@ -878,7 +878,7 @@ const EXT_VIEW_PAGE = (m) => {
       </script>`
     : "";
   const player = `<div id="extstage">${playerFor(sources[0].url)}</div>`;
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1642095506798662" crossorigin="anonymous"></script>
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${m.title} — Redowansky's Library</title>
 <style>
@@ -904,7 +904,7 @@ if(["jpg","jpeg","png","gif","webp","bmp","svg"].includes(e))return "image";
 if(["mp3","ogg","wav","m4a","flac"].includes(e))return "audio";return "other";}
 
 // ---- Download interstitial (ad slot lives here) ----
-const DL_PAGE = (bucket, key, size) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1642095506798662" crossorigin="anonymous"></script>
+const DL_PAGE = (bucket, key, size) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Download ${key.split("/").pop()} — Redowansky's Library</title>
 <style>
@@ -1117,11 +1117,6 @@ export class TunnelDO {
       return json({ tunnel: this.tunnelWs() ? "up" : "down" });
     }
 
-    if (path === "/ads.txt") {
-      return new Response("google.com, pub-1642095506798662, DIRECT, f08c47fec0942fa0\n", {
-        headers: { "content-type": "text/plain; charset=utf-8" },
-      });
-    }
 
     if (!env.S3_ACCESS_KEY || !env.S3_SECRET_KEY)
       return new Response("storage backend not configured", { status: 500 });
@@ -1131,8 +1126,6 @@ export class TunnelDO {
         return this.pageResp(PAGE, request);
       if (path === "/admin" || path === "/admin.html")
         return new Response(ADMIN_PAGE, { headers: { "content-type": "text/html;charset=utf-8" } });
-      if (path === "/ads.txt")
-        return new Response("google.com, pub-1642095506798662, DIRECT, f08c47fec0942fa0\n", { headers: { "content-type": "text/plain" } });
       if (path === "/api/admin/upload" && request.method === "PUT") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         const bucket = url.searchParams.get("bucket"), key = url.searchParams.get("key");
