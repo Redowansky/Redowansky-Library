@@ -152,13 +152,8 @@ nav a:hover,nav a.on{color:#fff}
 .hslide.on{opacity:1;pointer-events:auto}
 .hslide .hero-bg{transition:transform 6s ease}
 .hslide.on .hero-bg{transform:scale(1.04)}
-.hero-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:3;background:rgba(0,0,0,.45);color:#fff;border:1px solid rgba(255,255,255,.25);width:42px;height:42px;border-radius:50%;font-size:1.2rem;cursor:pointer}
-.hero-arrow:hover{background:rgba(0,230,118,.6)}
-.hero-arrow.prev{left:14px}
-.hero-arrow.next{right:14px}
-.hero-dots{position:absolute;left:0;right:0;bottom:18px;z-index:3;display:flex;gap:8px;justify-content:center}
-.hero-dots button{width:10px;height:10px;border-radius:50%;border:none;background:rgba(255,255,255,.35);cursor:pointer;padding:0}
-.hero-dots button.on{background:#00e676;width:26px;border-radius:999px}
+.hero-prog{position:absolute;left:0;bottom:0;height:3px;background:#00e676;z-index:3;width:0;animation:hprog 5s linear forwards}
+@keyframes hprog{from{width:0}to{width:100%}}
 .hero-info h1{font-size:3rem;font-weight:800;margin-bottom:12px;text-shadow:0 2px 20px rgba(0,0,0,.8)}
 .hero-meta{display:flex;gap:12px;align-items:center;margin-bottom:14px;font-size:.9rem;color:#b8d8c0}
 .hero-meta .rate{color:var(--grn);font-weight:700}
@@ -170,11 +165,12 @@ nav a:hover,nav a.on{color:#fff}
 .btn-info{background:rgba(100,100,100,.5);color:#fff}
 .btn-info:hover{background:rgba(100,100,100,.7)}
 section.row{padding:0 28px;margin-bottom:36px}
-section.row h2{font-size:1.3rem;margin-bottom:14px;font-weight:700}
+section.row h2{font-size:1.3rem;margin-bottom:14px;font-weight:700;border-left:3px solid #00e676;padding-left:10px}
+#authbox{margin-left:auto;white-space:nowrap;font-size:.85rem;background:#12291c;border:1px solid #1e3a2a;border-radius:999px;padding:7px 12px}
 .cards{display:flex;gap:12px;overflow-x:auto;padding-bottom:10px;scrollbar-width:thin}
 .cards::-webkit-scrollbar{height:8px}
 .cards::-webkit-scrollbar-thumb{background:#1e3a2a;border-radius:4px}
-.card{flex:0 0 160px;cursor:pointer;transition:.2s;border-radius:8px;overflow:hidden;background:#0c1410}
+.card{flex:0 0 160px;cursor:pointer;transition:.2s;border-radius:12px;overflow:hidden;background:#0c1410;border:1px solid #1e3a2a;box-shadow:0 4px 18px rgba(0,0,0,.35)}
 .card:hover{transform:scale(1.05);box-shadow:0 8px 30px rgba(0,230,118,.25);z-index:5}
 .card img{width:160px;height:240px;object-fit:cover;display:block;background:#0a120c}
 .card .cinfo{padding:8px 10px}
@@ -198,16 +194,16 @@ section.row h2{font-size:1.3rem;margin-bottom:14px;font-weight:700}
 @media(max-width:640px){
 .hero-info h1{font-size:1.8rem}
 .card{flex:0 0 110px}.card img,.card .noposter{width:110px;height:165px}
-header{padding:10px 12px;gap:10px;flex-wrap:wrap}
+header{padding:10px 12px;gap:8px;flex-wrap:wrap}
 .logo{font-size:1.1rem}
-nav{gap:12px}
+nav{gap:12px;order:3;width:100%}
 nav a{font-size:.8rem}
-.search{margin-left:0;flex:1;min-width:120px}
+.search{margin-left:0;flex:1 1 100px;min-width:0}
 .search input{width:100%;min-width:0}
+#authbox{font-size:.78rem;padding:5px 9px}
 section.row{padding:0 12px}
 .hero-info{padding:0 16px 40px}
 .hero{height:55vh;min-height:320px}
-.hero-arrow{width:34px;height:34px;font-size:1rem}
 .hero-btns{flex-wrap:wrap}
 .btn{padding:10px 20px;font-size:.9rem}
 .modal-box{margin:10px}
@@ -215,10 +211,9 @@ section.row{padding:0 12px}
 </style></head><body>
 <header id="hdr"><div class="logo" onclick="location.href='/'">🎬 Redowansky</div>
 <nav><a class="on" data-f="movie">Movies</a><a data-f="song">Video Songs</a></nav>
-<div class="search"><input id="q" placeholder="Search titles..." oninput="doSearch(this.value)"></div><div id="authbox" style="margin-left:8px;white-space:nowrap;font-size:.85rem"><a href="/auth/login" style="color:#00e676;text-decoration:none">Sign in with Google</a></div></header>
+<div class="search"><input id="q" placeholder="Search titles..." oninput="doSearch(this.value)"></div><div id="authbox"><a href="/auth/login" style="color:#00e676;text-decoration:none">Sign in with Google</a></div></header>
 <div class="hero" id="hero" style="display:none"><div id="hslides" style="position:absolute;inset:0"></div>
-<button class="hero-arrow prev" id="hprev" aria-label="Previous">‹</button><button class="hero-arrow next" id="hnext" aria-label="Next">›</button>
-<div class="hero-dots" id="hdots"></div></div>
+<div class="hero-prog" id="hprog"></div></div>
 <div class="browse-ad" style="display:flex;justify-content:center;padding:18px 10px 2px"><div data-mndbanid="e7f1fcbf-d6f7-4ef5-afe1-b2005cc6e66c"></div></div>
 <main id="main" style="padding-top:20px"></main>
 <div class="modal" id="modal"><div class="modal-box"><button class="modal-x" onclick="closeModal()">✕</button>
@@ -249,17 +244,14 @@ function buildHero(){
   $('hslides').innerHTML=pool.map((m,i)=>{
     return '<div class="hslide'+(i===0?' on':'')+'"><div class="hero-bg" style="background-image:url('+bgUrl(m)+')"></div><div class="hero-grad"></div><div class="hero-info"><h1>'+m.title+'</h1><div class="hero-meta"><span class="rate">★ '+(m.vote||'—')+'</span><span>'+(m.year||'')+'</span><span>'+(m.genres||[]).join(' · ')+'</span></div><p>'+(m.overview||'')+'</p><div class="hero-btns"><a class="btn btn-play" href="'+playUrl(m)+'">▶ Play</a><button class="btn btn-info" onclick="openModal(SLIDES['+i+'])">ⓘ More Info</button></div></div></div>';
   }).join('');
-  $('hdots').innerHTML=pool.map((m,i)=>'<button aria-label="Slide '+(i+1)+'" class="'+(i===0?'on':'')+'" onclick="goSlide('+i+')"></button>').join('');
-  const multi=pool.length>1;
-  $('hprev').style.display=$('hnext').style.display=$('hdots').style.display=multi?'':'none';
-  $('hprev').onclick=()=>goSlide((HI-1+pool.length)%pool.length);
-  $('hnext').onclick=()=>goSlide((HI+1)%pool.length);
+  $('hprog').style.display=pool.length>1?'':'none';
   startAuto();
 }
 function showSlide(i){
   HI=i;
   document.querySelectorAll('.hslide').forEach((s,j)=>s.classList.toggle('on',j===i));
-  document.querySelectorAll('#hdots button').forEach((d,j)=>d.classList.toggle('on',j===i));
+  const p=$('hprog');
+  if(p){p.style.animation='none';void p.offsetWidth;p.style.animation='';}
 }
 function goSlide(i){showSlide(i);startAuto();}
 function startAuto(){stopAuto();if(SLIDES.length>1)HTIMER=setInterval(()=>showSlide((HI+1)%SLIDES.length),5000);}
@@ -293,7 +285,7 @@ async function loadSync(){
       var link=e.viewUrl||(m?(m.external?'/view/ext/'+m.id:'/view/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/')):null);
       if(link){
         var pct=Math.min(100,Math.round(e.pos/e.dur*100));
-        html+='<section class="row"><h2>⏵ Continue Watching</h2><div style="background:#0c1410;border:1px solid #1e3a2a;border-radius:14px;padding:14px 16px;display:flex;gap:14px;align-items:center"><div style="flex:1;min-width:0"><b style="font-size:1.05rem">'+e.title+'</b><div style="color:#7a9a85;font-size:.85rem;margin-top:2px">'+fmtLeft(e.dur-e.pos)+' · resume at '+fmtClock(e.pos)+'</div><div style="height:5px;background:#1e3a2a;border-radius:3px;margin-top:8px"><div style="height:5px;width:'+pct+'%;background:#00e676;border-radius:3px"></div></div></div><a class="btn btn-play" href="'+link+'?start='+Math.floor(e.pos)+'">▶ Resume</a></div></section>';
+        html+='<section class="row"><h2>▶ Continue Watching</h2><div style="background:#0c1410;border:1px solid #1e3a2a;border-radius:14px;padding:14px 16px;display:flex;gap:14px;align-items:center"><div style="flex:1;min-width:0"><b style="font-size:1.05rem">'+e.title+'</b><div style="color:#7a9a85;font-size:.85rem;margin-top:2px">'+fmtLeft(e.dur-e.pos)+' · resume at '+fmtClock(e.pos)+'</div><div style="height:5px;background:#1e3a2a;border-radius:3px;margin-top:8px"><div style="height:5px;width:'+pct+'%;background:#00e676;border-radius:3px"></div></div></div><a class="btn btn-play" href="'+link+'?start='+Math.floor(e.pos)+'">▶ Resume</a></div></section>';
       }
     }
     var recent=entries.slice(0,12).map(function(e){
