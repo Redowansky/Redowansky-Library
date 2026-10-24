@@ -75,6 +75,59 @@ const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
 const bufToText = (buf) => new TextDecoder().decode(buf);
 
+// ---- Google sync (site sign-in + cross-device watch progress) ----
+// Same Google OAuth project as the app: redowansky-library. The app
+// already requests ID tokens for this Web client; the site uses the
+// standard OAuth code flow with redirect https://redowansky.bond/auth/callback
+// (that URI must be registered on the Web client in Google Cloud Console).
+// Progress is keyed ONLY by the Google subject id (sub), never by email,
+// in DATA_KV: progress:<sub>:<movieId> and sessions in session:<id>.
+// Site browsing stays open: sign-in is optional, only for personal history.
+const GOOGLE_CLIENT_ID = "401417620222-de0ve4jhi8vcqedihpo1n3gpsi7md4hi.apps.googleusercontent.com";
+const GOOGLE_REDIRECT_URI = "https://redowansky.bond/auth/callback";
+function b64urlDecode(s) {
+  try {
+    const b = s.replace(/-/g, "+").replace(/_/g, "/");
+    return atob(b + "=".repeat((4 - (b.length % 4)) % 4));
+  } catch { return ""; }
+}
+function parseCookies(req) {
+  const out = {};
+  for (const part of (req.headers.get("Cookie") || "").split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
+}
+async function verifyGoogleIdToken(idToken) {
+  if (!idToken) return null;
+  try {
+    const r = await fetch("https://oauth2.googleapis.com/tokeninfo?id_token=" + encodeURIComponent(idToken));
+    if (!r.ok) return null;
+    const t = await r.json();
+    if (t.aud !== GOOGLE_CLIENT_ID) return null;
+    if (t.exp && Number(t.exp) * 1000 < Date.now()) return null;
+    if (t.iss !== "https://accounts.google.com" && t.iss !== "accounts.google.com") return null;
+    if (!t.sub) return null;
+    return { sub: String(t.sub), email: t.email || "", name: t.name || "", picture: t.picture || "" };
+  } catch { return null; }
+}
+async function sessionFromRequest(env, req) {
+  try {
+    const id = parseCookies(req).lb_session;
+    if (!id || !/^[A-Za-z0-9_-]{20,80}$/.test(id)) return null;
+    const s = await env.DATA_KV.get("session:" + id, "json");
+    if (!s || !s.sub || !s.exp || s.exp < Date.now()) return null;
+    return { id, ...s };
+  } catch { return null; }
+}
+function sessionCookie(id, maxAge) {
+  return "lb_session=" + id + "; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=" + maxAge;
+}
+function progressId(raw) {
+  return String(raw || "").trim().slice(0, 120);
+}
+
 // ---- PAGE (public read-only library) ----
 const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="mnd-ver" content="gjfr65hhptrjchm0g4gugw" /><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script><script async src="https://ss.mrmnd.com/banner.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -150,7 +203,7 @@ section.row{padding:0 12px}
 </style></head><body>
 <header id="hdr"><div class="logo" onclick="location.href='/'">🎬 Redowansky</div>
 <nav><a class="on" data-f="movie">Movies</a><a data-f="song">Video Songs</a></nav>
-<div class="search"><input id="q" placeholder="Search titles..." oninput="doSearch(this.value)"></div></header>
+<div class="search"><input id="q" placeholder="Search titles..." oninput="doSearch(this.value)"></div><div id="authbox" style="margin-left:8px;white-space:nowrap;font-size:.85rem"><a href="/auth/login" style="color:#00e676;text-decoration:none">Sign in with Google</a></div></header>
 <div class="hero" id="hero" style="display:none"><div class="hero-bg" id="hbg"></div><div class="hero-grad"></div>
 <div class="hero-info"><h1 id="ht"></h1><div class="hero-meta" id="hm"></div><p id="ho"></p>
 <div class="hero-btns"><a class="btn btn-play" id="hp" href="#">▶ Play</a><button class="btn btn-info" id="hi">ⓘ More Info</button></div></div></div>
@@ -182,6 +235,50 @@ async function load(){
     }
   }catch(e){setStatus('● offline','bad');}
 }
+function fmtLeft(sec){sec=Math.max(0,Math.round(sec));if(sec>=3600)return Math.floor(sec/3600)+'h '+Math.floor(sec%3600/60)+'m left';if(sec>=60)return Math.floor(sec/60)+' min left';return sec+' sec left';}
+function fmtClock(sec){sec=Math.max(0,Math.floor(sec));var h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return h>0?h+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0'):m+':'+String(s).padStart(2,'0');}
+async function loadSync(){
+  try{
+    // Wait for the catalog (load()) so resume links can join by movie id.
+    for(var i=0;i<20&&!ALL.length;i++){await new Promise(function(r){setTimeout(r,200);});}
+    var me=await (await fetch('/auth/me')).json();
+    var box=$('authbox');
+    if(box){
+      if(me.signedIn){box.innerHTML='<span style="color:#e8f5e9">'+(me.name||'Signed in')+'</span> · <a href="/auth/logout" style="color:#7a9a85;text-decoration:none">Sign out</a>';}
+      else{box.innerHTML='<a href="/auth/login" style="color:#00e676;text-decoration:none">Sign in with Google</a>';}
+    }
+    if(!me.signedIn)return;
+    var d=await (await fetch('/api/progress')).json();
+    var entries=(d.entries||[]).filter(function(e){return e.pos>10&&e.dur>0;});
+    if(!entries.length)return;
+    var byId={};ALL.forEach(function(m){if(m.id)byId[m.id]=m;});
+    var unfinished=entries.filter(function(e){return !e.done;});
+    var html='';
+    if(unfinished.length){
+      var e=unfinished[0];
+      var m=byId[e.id];
+      var link=e.viewUrl||(m?(m.external?'/view/ext/'+m.id:'/view/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/')):null);
+      if(link){
+        var pct=Math.min(100,Math.round(e.pos/e.dur*100));
+        html+='<section class="row"><h2>⏵ Continue Watching</h2><div style="background:#0c1410;border:1px solid #1e3a2a;border-radius:14px;padding:14px 16px;display:flex;gap:14px;align-items:center"><div style="flex:1;min-width:0"><b style="font-size:1.05rem">'+e.title+'</b><div style="color:#7a9a85;font-size:.85rem;margin-top:2px">'+fmtLeft(e.dur-e.pos)+' · resume at '+fmtClock(e.pos)+'</div><div style="height:5px;background:#1e3a2a;border-radius:3px;margin-top:8px"><div style="height:5px;width:'+pct+'%;background:#00e676;border-radius:3px"></div></div></div><a class="btn btn-play" href="'+link+'?start='+Math.floor(e.pos)+'">▶ Resume</a></div></section>';
+      }
+    }
+    var recent=entries.slice(0,12).map(function(e){
+      var m=byId[e.id];
+      var link=e.viewUrl||(m?(m.external?'/view/ext/'+m.id:'/view/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/')):null);
+      if(!link)return '';
+      var pct=Math.min(100,Math.round(e.pos/e.dur*100));
+      var poster=e.poster?(e.poster.startsWith('http')?e.poster:IMG+e.poster):(m&&m.poster?(m.poster.startsWith('http')?m.poster:IMG+m.poster):'');
+      var p=poster?'<img loading="lazy" src="'+poster+'" alt="" style="width:110px;height:165px;object-fit:cover;border-radius:8px">':'<div style="width:110px;height:165px;display:flex;align-items:center;justify-content:center;font-size:2rem;background:#0a120c;border-radius:8px">🎬</div>';
+      return '<a href="'+link+'?start='+Math.floor(e.pos)+'" style="text-decoration:none;color:inherit;flex:0 0 110px">'+p+'<div style="padding:6px 2px"><b style="font-size:.8rem;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+e.title+'</b><span style="font-size:.72rem;color:#7a9a85">'+(e.done?'✓ Watched':fmtLeft(e.dur-e.pos))+'</span><div style="height:4px;background:#1e3a2a;border-radius:2px;margin-top:4px"><div style="height:4px;width:'+pct+'%;background:#00e676;border-radius:2px"></div></div></div></a>';
+    }).join('');
+    if(recent)html+='<section class="row"><h2>⏱ Recently Played</h2><div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:10px">'+recent+'</div></section>';
+    if(html){
+      var main=$('main');
+      main.innerHTML=html+main.innerHTML;
+    }
+  }catch(e){}
+}
 function card(m){
   const p=m.poster?'<img loading="lazy" src="'+(m.poster.startsWith('http')?m.poster:IMG+m.poster)+'" alt="">':'<div class="noposter">'+(m.type==='song'?'🎵':'🎬')+'</div>';
   const js=JSON.stringify(m).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -211,7 +308,7 @@ function openModal(m){
 }
 function closeModal(){$('modal').classList.remove('open');}
 $('modal').onclick=e=>{if(e.target.id==='modal')closeModal();};
-load();
+load();loadSync();
 </script><footer style="text-align:center;padding:28px 12px 36px;color:#5f7a68;font-size:.85rem">👀 __VIEWS_TODAY__ viewers today</footer></body></html>`;
 
 // ---- TMDB helpers ----
@@ -846,7 +943,29 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 <div class="adslot"><!-- AdSense ad unit goes here --></div>
 <div class="bar"><a class="btn" href="/gate/file/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")} ">⭳ Download</a><a class="btn ghost" href="/dl/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")} ">Details</a></div>
 <div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
-<div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div></body></html>`;
+<div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div>
+<script>
+(function(){
+  var vid=document.querySelector('.stage video');
+  if(!vid)return;
+  var start=parseInt(new URLSearchParams(location.search).get('start')||'0',10);
+  if(start>10){
+    vid.addEventListener('loadedmetadata',function(){try{vid.currentTime=start;}catch(e){}});
+    if(vid.readyState>=1){try{vid.currentTime=start;}catch(e){}}
+  }
+  var lastSent=0;
+  function send(force){
+    if(!vid.duration||vid.currentTime<10)return;
+    var now=Date.now();
+    if(!force&&now-lastSent<30000)return;
+    lastSent=now;
+    fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'file:${bucket}/${key}',title:${JSON.stringify(key.split("/").pop())},poster:'',type:'movie',url:vid.currentSrc||vid.src,viewUrl:location.pathname,pos:vid.currentTime,dur:vid.duration,updatedAt:Date.now()})}).catch(function(){});
+  }
+  vid.addEventListener('timeupdate',function(){send(false);});
+  vid.addEventListener('pause',function(){send(true);});
+  window.addEventListener('beforeunload',function(){send(true);});
+})();
+</script></body></html>`;
 const EXT_VIEW_PAGE = (m) => {
   const sources = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
   const isDrive = (u) => u.indexOf("google.com") >= 0 && /[?&]id=([a-zA-Z0-9_-]+)/.test(u);
@@ -901,7 +1020,29 @@ ${switcher}
 <div style="margin-top:16px;text-align:center"><a id="dlbtn" href="/gate/ext/${m.id}" style="display:inline-block;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;text-decoration:none;font-weight:700;font-size:1rem;padding:13px 38px;border-radius:14px;box-shadow:0 8px 26px rgba(0,230,118,.35)">⭳ Download</a></div>
 <p class="note">🔗 streamed from external host</p>
 <div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
-<div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div></body></html>`;
+<div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div>
+<script>
+(function(){
+  var vid=document.querySelector('#extstage video');
+  if(!vid)return;
+  var start=parseInt(new URLSearchParams(location.search).get('start')||'0',10);
+  if(start>10){
+    vid.addEventListener('loadedmetadata',function(){try{vid.currentTime=start;}catch(e){}});
+    if(vid.readyState>=1){try{vid.currentTime=start;}catch(e){}}
+  }
+  var lastSent=0;
+  function send(force){
+    if(!vid.duration||vid.currentTime<10)return;
+    var now=Date.now();
+    if(!force&&now-lastSent<30000)return;
+    lastSent=now;
+    fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'${m.id}',title:${JSON.stringify(m.title)},poster:${JSON.stringify(m.poster||"")},type:${JSON.stringify(m.type||"movie")},url:vid.currentSrc||vid.src,viewUrl:location.pathname,pos:vid.currentTime,dur:vid.duration,updatedAt:Date.now()})}).catch(function(){});
+  }
+  vid.addEventListener('timeupdate',function(){send(false);});
+  vid.addEventListener('pause',function(){send(true);});
+  window.addEventListener('beforeunload',function(){send(true);});
+})();
+</script></body></html>`;
 };
 function mediaKind(name){const e=name.split(".").pop().toLowerCase();
 if(["mp4","webm","mkv","avi","mov","m4v"].includes(e))return "video";
@@ -1199,6 +1340,117 @@ export class TunnelDO {
 
     if (path === "/__health") {
       return json({ tunnel: this.tunnelWs() ? "up" : "down" });
+    }
+
+    // ---- Google sync: auth + progress (before the S3 gate below) ----
+    if (path === "/auth/login" && request.method === "GET") {
+      if (!env.GOOGLE_CLIENT_SECRET) return new Response("Google sign-in is not configured yet (client secret missing)", { status: 503 });
+      const state = [...crypto.getRandomValues(new Uint8Array(24))].map(b => b.toString(16).padStart(2, "0")).join("");
+      await env.DATA_KV.put("oauth-state:" + state, "1", { expirationTtl: 600 });
+      const q = new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID, redirect_uri: GOOGLE_REDIRECT_URI,
+        response_type: "code", scope: "openid email profile", state, prompt: "select_account",
+      });
+      return Response.redirect("https://accounts.google.com/o/oauth2/v2/auth?" + q.toString(), 302);
+    }
+    if (path === "/auth/callback" && request.method === "GET") {
+      const code = url.searchParams.get("code"), state = url.searchParams.get("state");
+      if (!code || !state) return new Response("missing code/state", { status: 400 });
+      const ok = await env.DATA_KV.get("oauth-state:" + state);
+      if (!ok) return new Response("expired or invalid sign-in — try again", { status: 400 });
+      await env.DATA_KV.delete("oauth-state:" + state);
+      if (!env.GOOGLE_CLIENT_SECRET) return new Response("Google sign-in is not configured yet", { status: 503 });
+      try {
+        const form = new URLSearchParams({
+          code, client_id: GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET,
+          redirect_uri: GOOGLE_REDIRECT_URI, grant_type: "authorization_code",
+        });
+        const tr = await fetch("https://oauth2.googleapis.com/token", { method: "POST", body: form });
+        const tj = await tr.json();
+        if (!tj.id_token) return new Response("Google sign-in failed", { status: 502 });
+        const user = await verifyGoogleIdToken(tj.id_token);
+        if (!user) return new Response("Google sign-in verification failed", { status: 502 });
+        const sid = [...crypto.getRandomValues(new Uint8Array(24))].map(b => b.toString(16).padStart(2, "0")).join("");
+        const exp = Date.now() + 30 * 24 * 3600 * 1000;
+        await env.DATA_KV.put("session:" + sid, JSON.stringify({ sub: user.sub, name: user.name, email: user.email, exp }), { expirationTtl: 30 * 24 * 3600 });
+        return new Response(null, { status: 302, headers: { Location: "/", "Set-Cookie": sessionCookie(sid, 30 * 24 * 3600) } });
+      } catch (e) { return new Response("Google sign-in error: " + String(e.message || e).slice(0, 200), { status: 502 }); }
+    }
+    if (path === "/auth/logout" && request.method === "GET") {
+      const s = await sessionFromRequest(env, request);
+      if (s) await env.DATA_KV.delete("session:" + s.id);
+      return new Response(null, { status: 302, headers: { Location: "/", "Set-Cookie": "lb_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0" } });
+    }
+    if (path === "/auth/me" && request.method === "GET") {
+      const s = await sessionFromRequest(env, request);
+      if (!s) return json({ signedIn: false });
+      return json({ signedIn: true, name: s.name || "", email: s.email || "" });
+    }
+    if (path === "/api/progress" && request.method === "GET") {
+      const s = await sessionFromRequest(env, request);
+      if (!s) return json({ signedIn: false, entries: [] });
+      try {
+        const list = await env.DATA_KV.list({ prefix: "progress:" + s.sub + ":" });
+        const entries = [];
+        for (const k of list.keys) {
+          const v = await env.DATA_KV.get(k.name, "json");
+          if (v) entries.push(v);
+        }
+        entries.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        return json({ signedIn: true, name: s.name || "", entries });
+      } catch (e) { return json({ error: String(e.message || e) }, 500); }
+    }
+    if (path === "/api/progress" && request.method === "POST") {
+      // Caller is either the site (session cookie) or the app (Bearer ID token).
+      let sub = null, who = null;
+      const sess = await sessionFromRequest(env, request);
+      if (sess) { sub = sess.sub; who = "session"; }
+      if (!sub) {
+        const auth = request.headers.get("Authorization") || "";
+        const tok = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        const user = await verifyGoogleIdToken(tok);
+        if (user) { sub = user.sub; who = "token"; }
+      }
+      if (!sub) return json({ error: "not signed in" }, 401);
+      let b = {};
+      try { b = await request.json(); } catch { return json({ error: "bad json" }, 400); }
+      const items = Array.isArray(b.entries) ? b.entries : [b];
+      const saved = [];
+      for (const it of items) {
+        const id = progressId(it.id);
+        if (!id) continue;
+        const pos = Number(it.pos || 0), dur = Number(it.dur || 0);
+        if (!(pos >= 0) || !(dur > 0)) continue;
+        const updatedAt = Number(it.updatedAt || it.ts || 0) || Date.now();
+        // Last-write-wins: never let an older write clobber a newer one.
+        const key = "progress:" + sub + ":" + id;
+        const old = await env.DATA_KV.get(key, "json");
+        if (old && (old.updatedAt || 0) > updatedAt) { saved.push({ id, kept: "existing" }); continue; }
+        const rec = {
+          id, title: String(it.title || "").slice(0, 200), poster: String(it.poster || "").slice(0, 500),
+          type: String(it.type || "movie").slice(0, 20), url: String(it.url || "").slice(0, 1000),
+          viewUrl: String(it.viewUrl || "").slice(0, 500), pos, dur, done: pos >= dur - 45,
+          updatedAt,
+        };
+        // Resolve a site resume link for app entries that only carry a catalog id.
+        if (!rec.viewUrl && id) {
+          try {
+            const ext = await getExtMovies(env);
+            if (ext[id]) rec.viewUrl = "/view/ext/" + id;
+          } catch {}
+        }
+        await env.DATA_KV.put(key, JSON.stringify(rec));
+        saved.push({ id, kept: "saved" });
+      }
+      return json({ ok: true, via: who, saved });
+    }
+    if (path === "/api/progress" && request.method === "DELETE") {
+      const s = await sessionFromRequest(env, request);
+      if (!s) return json({ error: "not signed in" }, 401);
+      const id = progressId(url.searchParams.get("id"));
+      if (!id) return json({ error: "id required" }, 400);
+      await env.DATA_KV.delete("progress:" + s.sub + ":" + id);
+      return json({ ok: true });
     }
 
     // App feature: "Ask for a movie". Requests land in DATA_KV as
