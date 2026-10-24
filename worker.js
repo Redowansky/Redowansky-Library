@@ -144,10 +144,21 @@ nav a{color:#b8d8c0;text-decoration:none;font-size:.9rem;cursor:pointer}
 nav a:hover,nav a.on{color:#fff}
 .search{margin-left:auto;display:flex;align-items:center;background:#0c1410;border:1px solid #1e3a2a;border-radius:8px;padding:6px 12px}
 .search input{background:none;border:none;color:#fff;outline:none;width:160px;font-size:.9rem}
-.hero{position:relative;height:85vh;min-height:500px;display:flex;align-items:flex-end;overflow:hidden}
+.hero{position:relative;height:62vh;min-height:380px;display:flex;align-items:flex-end;overflow:hidden}
 .hero-bg{position:absolute;inset:0;background-size:cover;background-position:center top}
 .hero-grad{position:absolute;inset:0;background:linear-gradient(180deg,transparent 20%,rgba(6,9,6,.7) 60%,var(--bg) 100%),linear-gradient(90deg,rgba(6,9,6,.8),transparent 60%)}
 .hero-info{position:relative;z-index:2;padding:0 28px 60px;max-width:640px}
+.hslide{position:absolute;inset:0;display:flex;align-items:flex-end;opacity:0;transition:opacity .8s ease;pointer-events:none}
+.hslide.on{opacity:1;pointer-events:auto}
+.hslide .hero-bg{transition:transform 6s ease}
+.hslide.on .hero-bg{transform:scale(1.04)}
+.hero-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:3;background:rgba(0,0,0,.45);color:#fff;border:1px solid rgba(255,255,255,.25);width:42px;height:42px;border-radius:50%;font-size:1.2rem;cursor:pointer}
+.hero-arrow:hover{background:rgba(0,230,118,.6)}
+.hero-arrow.prev{left:14px}
+.hero-arrow.next{right:14px}
+.hero-dots{position:absolute;left:0;right:0;bottom:18px;z-index:3;display:flex;gap:8px;justify-content:center}
+.hero-dots button{width:10px;height:10px;border-radius:50%;border:none;background:rgba(255,255,255,.35);cursor:pointer;padding:0}
+.hero-dots button.on{background:#00e676;width:26px;border-radius:999px}
 .hero-info h1{font-size:3rem;font-weight:800;margin-bottom:12px;text-shadow:0 2px 20px rgba(0,0,0,.8)}
 .hero-meta{display:flex;gap:12px;align-items:center;margin-bottom:14px;font-size:.9rem;color:#b8d8c0}
 .hero-meta .rate{color:var(--grn);font-weight:700}
@@ -195,7 +206,8 @@ nav a{font-size:.8rem}
 .search input{width:100%;min-width:0}
 section.row{padding:0 12px}
 .hero-info{padding:0 16px 40px}
-.hero{height:70vh;min-height:400px}
+.hero{height:55vh;min-height:320px}
+.hero-arrow{width:34px;height:34px;font-size:1rem}
 .hero-btns{flex-wrap:wrap}
 .btn{padding:10px 20px;font-size:.9rem}
 .modal-box{margin:10px}
@@ -204,9 +216,9 @@ section.row{padding:0 12px}
 <header id="hdr"><div class="logo" onclick="location.href='/'">🎬 Redowansky</div>
 <nav><a class="on" data-f="movie">Movies</a><a data-f="song">Video Songs</a></nav>
 <div class="search"><input id="q" placeholder="Search titles..." oninput="doSearch(this.value)"></div><div id="authbox" style="margin-left:8px;white-space:nowrap;font-size:.85rem"><a href="/auth/login" style="color:#00e676;text-decoration:none">Sign in with Google</a></div></header>
-<div class="hero" id="hero" style="display:none"><div class="hero-bg" id="hbg"></div><div class="hero-grad"></div>
-<div class="hero-info"><h1 id="ht"></h1><div class="hero-meta" id="hm"></div><p id="ho"></p>
-<div class="hero-btns"><a class="btn btn-play" id="hp" href="#">▶ Play</a><button class="btn btn-info" id="hi">ⓘ More Info</button></div></div></div>
+<div class="hero" id="hero" style="display:none"><div id="hslides" style="position:absolute;inset:0"></div>
+<button class="hero-arrow prev" id="hprev" aria-label="Previous">‹</button><button class="hero-arrow next" id="hnext" aria-label="Next">›</button>
+<div class="hero-dots" id="hdots"></div></div>
 <div class="browse-ad" style="display:flex;justify-content:center;padding:18px 10px 2px"><div data-mndbanid="e7f1fcbf-d6f7-4ef5-afe1-b2005cc6e66c"></div></div>
 <main id="main" style="padding-top:20px"></main>
 <div class="modal" id="modal"><div class="modal-box"><button class="modal-x" onclick="closeModal()">✕</button>
@@ -223,18 +235,39 @@ async function load(){
     ALL=d.movies||[];
     if(!ALL.length){$('main').innerHTML='<div class="empty">No movies yet.</div>';setStatus('empty');return;}
     render('movie','');
-    const feat=[...ALL].filter(m=>m.backdrop).sort((a,b)=>(b.vote||0)-(a.vote||0))[0]||ALL[0];
-    if(feat){
-      $('hero').style.display='flex';
-      if(feat.backdrop)$('hbg').style.backgroundImage='url('+BG+feat.backdrop+')';
-      $('ht').textContent=feat.title;
-      $('hm').innerHTML='<span class="rate">★ '+(feat.vote||'—')+'</span><span>'+(feat.year||'')+'</span><span>'+(feat.genres||[]).join(' · ')+'</span>';
-      $('ho').textContent=feat.overview||'';
-      $('hp').href=feat.external?'/view/ext/'+feat.id:'/view/'+encodeURIComponent(feat.bucket)+'/'+feat.key.split('/').map(encodeURIComponent).join('/');
-      $('hi').onclick=()=>openModal(feat);
-    }
+    buildHero();
   }catch(e){setStatus('● offline','bad');}
 }
+let SLIDES=[],HI=0,HTIMER=null;
+function playUrl(m){return m.external?'/view/ext/'+m.id:'/view/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');}
+function bgUrl(m){if(m.backdrop)return BG+m.backdrop;if(m.poster)return m.poster.startsWith('http')?m.poster:IMG+m.poster;return '';}
+function buildHero(){
+  const pool=[...ALL].filter(m=>m.type!=='song').sort((a,b)=>(b.vote||0)-(a.vote||0)).slice(0,6);
+  SLIDES=pool;HI=0;
+  if(!pool.length){$('hero').style.display='none';return;}
+  $('hero').style.display='flex';
+  $('hslides').innerHTML=pool.map((m,i)=>{
+    return '<div class="hslide'+(i===0?' on':'')+'"><div class="hero-bg" style="background-image:url('+bgUrl(m)+')"></div><div class="hero-grad"></div><div class="hero-info"><h1>'+m.title+'</h1><div class="hero-meta"><span class="rate">★ '+(m.vote||'—')+'</span><span>'+(m.year||'')+'</span><span>'+(m.genres||[]).join(' · ')+'</span></div><p>'+(m.overview||'')+'</p><div class="hero-btns"><a class="btn btn-play" href="'+playUrl(m)+'">▶ Play</a><button class="btn btn-info" onclick="openModal(SLIDES['+i+'])">ⓘ More Info</button></div></div></div>';
+  }).join('');
+  $('hdots').innerHTML=pool.map((m,i)=>'<button aria-label="Slide '+(i+1)+'" class="'+(i===0?'on':'')+'" onclick="goSlide('+i+')"></button>').join('');
+  const multi=pool.length>1;
+  $('hprev').style.display=$('hnext').style.display=$('hdots').style.display=multi?'':'none';
+  $('hprev').onclick=()=>goSlide((HI-1+pool.length)%pool.length);
+  $('hnext').onclick=()=>goSlide((HI+1)%pool.length);
+  startAuto();
+}
+function showSlide(i){
+  HI=i;
+  document.querySelectorAll('.hslide').forEach((s,j)=>s.classList.toggle('on',j===i));
+  document.querySelectorAll('#hdots button').forEach((d,j)=>d.classList.toggle('on',j===i));
+}
+function goSlide(i){showSlide(i);startAuto();}
+function startAuto(){stopAuto();if(SLIDES.length>1)HTIMER=setInterval(()=>showSlide((HI+1)%SLIDES.length),5000);}
+function stopAuto(){if(HTIMER){clearInterval(HTIMER);HTIMER=null;}}
+$('hero').addEventListener('mouseenter',stopAuto);
+$('hero').addEventListener('mouseleave',startAuto);
+$('hero').addEventListener('touchstart',stopAuto,{passive:true});
+$('hero').addEventListener('touchend',startAuto);
 function fmtLeft(sec){sec=Math.max(0,Math.round(sec));if(sec>=3600)return Math.floor(sec/3600)+'h '+Math.floor(sec%3600/60)+'m left';if(sec>=60)return Math.floor(sec/60)+' min left';return sec+' sec left';}
 function fmtClock(sec){sec=Math.max(0,Math.floor(sec));var h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return h>0?h+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0'):m+':'+String(s).padStart(2,'0');}
 async function loadSync(){
@@ -286,7 +319,7 @@ function card(m){
 }
 function render(filter,q){
   q=(q||'').toLowerCase();
-  $('hero').style.display=(filter==='song'||!$('ht').textContent)?'none':'flex';
+  $('hero').style.display=(filter==='song'||!SLIDES.length)?'none':'flex';
   let list=ALL.filter(m=>(filter==='all'||m.type===filter)&&(!q||m.title.toLowerCase().includes(q)));
   const main=$('main');main.innerHTML='';
   if(!list.length){main.innerHTML='<div class="empty">Nothing found.</div>';return;}
