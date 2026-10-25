@@ -135,6 +135,7 @@ const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script
 /*]]>/* */
 </script><meta name="mnd-ver" content="gjfr65hhptrjchm0g4gugw" /><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script><script async src="https://ss.mrmnd.com/banner.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Redowansky's Library — free movie and video song streaming: Hollywood and Bollywood films with Continue Watching and resume across devices.">
 <title>Redowansky's Library — Movies & Songs</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -1355,6 +1356,45 @@ export class TunnelDO {
     return promise;
   }
 
+  // Shared catalog listing used by /api/movies and /sitemap.xml (live data only).
+  async listMovies(env) {
+    const br = await this.s3fetch("GET", "/");
+    let movies = [];
+    if (br.status < 400) {
+      const buckets = parseBuckets(bufToText(br.body));
+      for (const b of buckets) {
+        const lr = await this.s3fetch("GET", "/" + b, { query: "list-type=2&max-keys=1000" });
+        if (lr.status < 400) {
+          const xml = bufToText(lr.body);
+          for (const m of xml.matchAll(/<Key>([^<]+)<\/Key>/g)) {
+            const key = m[1];
+            const ext = key.split(".").pop().toLowerCase();
+            if (!["mp4","webm","mkv","avi","mov","m4v"].includes(ext)) continue;
+            const meta = await this.state.storage.get("meta:"+b+":"+key);
+            movies.push({
+              bucket: b, key,
+              title: meta?.title || key.split("/").pop().replace(/\.[^.]+$/,""),
+              year: meta?.year || null,
+              overview: meta?.overview || null,
+              poster: meta?.poster || null,
+              backdrop: meta?.backdrop || null,
+              vote: meta?.vote || null,
+              genres: meta?.genres || [],
+              type: meta?.type || "movie",
+              tmdb: meta?.tmdb || null,
+            });
+          }
+        }
+      }
+    }
+    // External movies (linked, not hosted) - from KV (survives deploys)
+    try {
+      const extObj = await getExtMovies(env);
+      for (const id in extObj) movies.push({ ...extObj[id], external: true });
+    } catch (e) {}
+    return movies;
+  }
+
   async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -1580,41 +1620,21 @@ export class TunnelDO {
       }
       // Public: list all movies with metadata
       if (path === "/api/movies" && request.method === "GET") {
-        const br = await this.s3fetch("GET", "/");
-        let movies = [];
-        if (br.status < 400) {
-          const buckets = parseBuckets(bufToText(br.body));
-          for (const b of buckets) {
-            const lr = await this.s3fetch("GET", "/" + b, { query: "list-type=2&max-keys=1000" });
-            if (lr.status < 400) {
-              const xml = bufToText(lr.body);
-              for (const m of xml.matchAll(/<Key>([^<]+)<\/Key>/g)) {
-                const key = m[1];
-                const ext = key.split(".").pop().toLowerCase();
-                if (!["mp4","webm","mkv","avi","mov","m4v"].includes(ext)) continue;
-                const meta = await this.state.storage.get("meta:"+b+":"+key);
-                movies.push({
-                  bucket: b, key,
-                  title: meta?.title || key.split("/").pop().replace(/\.[^.]+$/,""),
-                  year: meta?.year || null,
-                  overview: meta?.overview || null,
-                  poster: meta?.poster || null,
-                  backdrop: meta?.backdrop || null,
-                  vote: meta?.vote || null,
-                  genres: meta?.genres || [],
-                  type: meta?.type || "movie",
-                  tmdb: meta?.tmdb || null,
-                });
-              }
-            }
-          }
+        return json({ movies: await this.listMovies(env) });
+      }
+      // Public: sitemap generated from the live catalog (home + one view page per title)
+      if (path === "/sitemap.xml" && request.method === "GET") {
+        const movies = await this.listMovies(env);
+        const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        const urls = ["https://redowansky.bond/"];
+        for (const m of movies) {
+          urls.push(m.external
+            ? "https://redowansky.bond/view/ext/" + m.id
+            : "https://redowansky.bond/view/" + encodeURIComponent(m.bucket) + "/" + m.key.split("/").map(encodeURIComponent).join("/"));
         }
-        // External movies (linked, not hosted) - from KV (survives deploys)
-        try {
-          const extObj = await getExtMovies(env);
-          for (const id in extObj) movies.push({ ...extObj[id], external: true });
-        } catch (e) {}
-        return json({ movies });
+        const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+          + urls.map(u => "  <url><loc>" + esc(u) + "</loc></url>").join("\n") + "\n</urlset>";
+        return new Response(xml, { headers: { "content-type": "application/xml;charset=utf-8", "cache-control": "public, max-age=3600" } });
       }
       // Admin: add external movie link
       if (path === "/api/admin/external" && request.method === "POST") {
