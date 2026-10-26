@@ -952,7 +952,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 .playgate{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#000;cursor:pointer}
 .pgbtn{font-size:4rem;color:#00e676;text-shadow:0 2px 20px rgba(0,230,118,.5)}
 .pgtxt{font-size:.9rem;color:#e8f5e9}
-.adgate{position:fixed;inset:0;z-index:9999;display:none;flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;background:#000;padding:60px 16px 24px;overflow-y:auto;text-align:center}
+.adgate{position:fixed;inset:0;z-index:999;display:none;flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;background:#000;padding:60px 16px 24px;overflow-y:auto;text-align:center}
 .adclose{position:fixed;top:14px;right:16px;z-index:10000;width:44px;height:44px;border-radius:50%;background:#1e3a2a;color:#fff;font-size:1.4rem;border:none;cursor:pointer}
 .adlabel{font-size:.85rem;color:#7a9a85;letter-spacing:.08em}
 .adbtn{background:#00c853;color:#fff;border:none;font-weight:700;font-size:1rem;padding:12px 32px;border-radius:12px;cursor:pointer}
@@ -1109,7 +1109,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 .playgate{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#000;cursor:pointer}
 .pgbtn{font-size:4rem;color:#00e676;text-shadow:0 2px 20px rgba(0,230,118,.5)}
 .pgtxt{font-size:.9rem;color:#e8f5e9}
-.adgate{position:fixed;inset:0;z-index:9999;display:none;flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;background:#000;padding:60px 16px 24px;overflow-y:auto;text-align:center}
+.adgate{position:fixed;inset:0;z-index:999;display:none;flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;background:#000;padding:60px 16px 24px;overflow-y:auto;text-align:center}
 .adclose{position:fixed;top:14px;right:16px;z-index:10000;width:44px;height:44px;border-radius:50%;background:#1e3a2a;color:#fff;font-size:1.4rem;border:none;cursor:pointer}
 .adlabel{font-size:.85rem;color:#7a9a85;letter-spacing:.08em}
 .adbtn{background:#00c853;color:#fff;border:none;font-weight:700;font-size:1rem;padding:12px 32px;border-radius:12px;cursor:pointer}
