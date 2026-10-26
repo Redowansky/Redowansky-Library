@@ -952,6 +952,9 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 .playgate{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#000;cursor:pointer}
 .pgbtn{font-size:4rem;color:#00e676;text-shadow:0 2px 20px rgba(0,230,118,.5)}
 .pgtxt{font-size:.9rem;color:#e8f5e9}
+.adgate{position:absolute;inset:0;z-index:10;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#000;padding:16px;text-align:center}
+.adlabel{font-size:.85rem;color:#7a9a85;letter-spacing:.08em}
+.adbtn{background:#00c853;color:#fff;border:none;font-weight:700;font-size:1rem;padding:12px 32px;border-radius:12px;cursor:pointer}
 </style></head><body>
 <div class="top"><a href="/">← Library</a><h1>${key.split("/").pop()}</h1></div>
 <div class="stage">${kind === "video" ? `
@@ -985,12 +988,14 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 (function(){
   var vid=document.querySelector('.stage video');
   if(!vid)return;
-  /* Play-click ad gate, silent CineFreak pattern: click 1 = ad 1,
-     click 2 = ad 2, click 3 = play. Each overlay click lets the
-     PopAds popunder fire (do NOT stopPropagation) with NO ad message
-     shown. Native controls are hidden until the gate passes, so only
-     the overlay ▶ is visible at first. After playback starts the
-     overlay stays hidden, so pause/resume is not re-gated. */
+  /* Play-click ad gate, VISIBLE Mondiad version: ▶ click = Ad 1
+     screen, Continue = Ad 2 screen, Continue = play. The ad screen
+     shows the page's own Mondiad banner (moved in from below the
+     player, so it is already filled by Mondiad) with a Continue
+     button — no hidden popunder, no ad message on the play button.
+     Native controls are hidden until the gate passes, so only the
+     overlay ▶ is visible at first. After playback starts both
+     overlays stay hidden, so pause/resume is not re-gated. */
   var stage=document.querySelector('.stage');
   if(stage){
     stage.style.position='relative';
@@ -999,15 +1004,30 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
     gate.className='playgate';
     gate.innerHTML='<div class="pgbtn">▶</div><div class="pgtxt">Click to play</div>';
     stage.appendChild(gate);
-    var adClicks=0;
-    gate.addEventListener('click',function(){
-      adClicks++;
-      if(adClicks<3)return;
-      gate.style.display='none';
+    var adBox=document.createElement('div');
+    adBox.className='adgate';
+    adBox.innerHTML='<div class="adlabel" id="adlabel">Sponsored • Ad 1 of 2</div><div id="adbanwrap"></div><button class="adbtn" id="adbtn">Continue ▶</button>';
+    stage.appendChild(adBox);
+    var ban=document.querySelector('[data-mndbanid]');
+    var banParent=ban?ban.parentNode:null, banNext=ban?ban.nextSibling:null;
+    var adStep=0;
+    function showAd(step){
+      adStep=step;
+      document.getElementById('adlabel').textContent='Sponsored • Ad '+step+' of 2';
+      if(ban){document.getElementById('adbanwrap').appendChild(ban);}
+      gate.style.display='none'; adBox.style.display='flex';
+    }
+    function finishAd(){
+      adBox.style.display='none';
+      if(ban&&banParent){banParent.insertBefore(ban,banNext);}
       vid.setAttribute('controls','');
       try{vid.play();}catch(e){}
+    }
+    gate.addEventListener('click',function(){showAd(1);});
+    document.getElementById('adbtn').addEventListener('click',function(){
+      if(adStep===1){showAd(2);}else{finishAd();}
     });
-    vid.addEventListener('play',function(){gate.style.display='none';vid.setAttribute('controls','');});
+    vid.addEventListener('play',function(){gate.style.display='none';adBox.style.display='none';vid.setAttribute('controls','');});
   }
   var start=parseInt(new URLSearchParams(location.search).get('start')||'0',10);
   if(start>10){
@@ -1082,6 +1102,9 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 .playgate{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#000;cursor:pointer}
 .pgbtn{font-size:4rem;color:#00e676;text-shadow:0 2px 20px rgba(0,230,118,.5)}
 .pgtxt{font-size:.9rem;color:#e8f5e9}
+.adgate{position:absolute;inset:0;z-index:10;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#000;padding:16px;text-align:center}
+.adlabel{font-size:.85rem;color:#7a9a85;letter-spacing:.08em}
+.adbtn{background:#00c853;color:#fff;border:none;font-weight:700;font-size:1rem;padding:12px 32px;border-radius:12px;cursor:pointer}
 </style></head><body>
 <div class="top"><a href="/">← Library</a><h1>${m.title}</h1></div>
 ${switcher}
@@ -1092,18 +1115,27 @@ ${switcher}
 <div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div>
 <script>
 (function(){
-  /* Play-click ad gate, silent CineFreak pattern: click 1 = ad 1,
-     click 2 = ad 2, click 3 = play / reveals the player. Each overlay
-     click lets PopAds fire (no stopPropagation) with NO ad message
-     shown. Native video controls are hidden until the gate passes,
-     so only the overlay ▶ is visible at first (the opaque overlay
-     also hides Drive iframe controls). Re-runnable so
-     source-switching (setSrc) re-gates the new player. */
+  /* Play-click ad gate, VISIBLE Mondiad version: ▶ click = Ad 1
+     screen, Continue = Ad 2 screen, Continue = play / reveals the
+     player. The ad screen shows the page's own Mondiad banner
+     (moved in from below the player, so it is already filled) with
+     a Continue button — no hidden popunder. Native video controls
+     are hidden until the gate passes, so only the overlay ▶ is
+     visible at first (the opaque overlay also hides Drive iframe
+     controls). Re-runnable so source-switching (setSrc) re-gates
+     the new player; re-gating restores the banner to its place. */
   window.initPlayGate=function(){
     var stage=document.getElementById('extstage');
     if(!stage||!stage.parentNode)return;
     var old=stage.parentNode.querySelector('.playgate');
     if(old)old.remove();
+    var oldAd=stage.parentNode.querySelector('.adgate');
+    if(oldAd){
+      var banInAd=oldAd.querySelector('[data-mndbanid]');
+      if(banInAd)document.body.appendChild(banInAd);
+      oldAd.remove();
+    }
+    var ban=document.querySelector('[data-mndbanid]');
     var media=stage.querySelector('video,iframe');
     if(!media)return;
     if(media.tagName==='VIDEO')media.removeAttribute('controls');
@@ -1113,14 +1145,28 @@ ${switcher}
     gate.className='playgate';
     gate.innerHTML='<div class="pgbtn">▶</div><div class="pgtxt">Click to play</div>';
     wrap.appendChild(gate);
-    var adClicks=0;
-    gate.addEventListener('click',function(){
-      adClicks++;
-      if(adClicks<3)return;
-      gate.style.display='none';
+    var adBox=document.createElement('div');
+    adBox.className='adgate';
+    adBox.innerHTML='<div class="adlabel">Sponsored • Ad 1 of 2</div><div class="adbanwrap"></div><button class="adbtn">Continue ▶</button>';
+    wrap.appendChild(adBox);
+    var banParent=ban?ban.parentNode:null, banNext=ban?ban.nextSibling:null;
+    var adStep=0;
+    function showAd(step){
+      adStep=step;
+      adBox.querySelector('.adlabel').textContent='Sponsored • Ad '+step+' of 2';
+      if(ban){adBox.querySelector('.adbanwrap').appendChild(ban);}
+      gate.style.display='none'; adBox.style.display='flex';
+    }
+    function finishAd(){
+      adBox.style.display='none';
+      if(ban&&banParent){banParent.insertBefore(ban,banNext);}
       if(media.tagName==='VIDEO'){media.setAttribute('controls','');try{media.play();}catch(e){}}
+    }
+    gate.addEventListener('click',function(){showAd(1);});
+    adBox.querySelector('.adbtn').addEventListener('click',function(){
+      if(adStep===1){showAd(2);}else{finishAd();}
     });
-    if(media.tagName==='VIDEO')media.addEventListener('play',function(){gate.style.display='none';media.setAttribute('controls','');});
+    if(media.tagName==='VIDEO')media.addEventListener('play',function(){gate.style.display='none';adBox.style.display='none';media.setAttribute('controls','');});
   };
   window.initPlayGate();
   var vid=document.querySelector('#extstage video');
