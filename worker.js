@@ -932,7 +932,7 @@ const VIEW_PAGE = (bucket, key, kind) => `<!DOCTYPE html><html lang="en"><head><
 /*<![CDATA[/* */
 (function(){var j=window,w="a48e5e27c3b2f1d56d51431ff0724038",k=[["siteId",544*440-361-529+5086359],["minBid",0],["popundersPerIP","0"],["delayBetween",0],["default",false],["defaultPerDay",0],["topmostLayer","auto"]],f=["d3d3LnZpc2FyaW9tZWRpYS5jb20venRpbWVhZ28ubWluLmNzcw==","ZDEzazdwcmF4MXlpMDQuY2xvdWRmcm9udC5uZXQvdnVQYVYvcWwyMG4ubWluLmpz"],x=-1,p,t,o=function(){clearTimeout(t);x++;if(f[x]&&!(1818755417000<(new Date).getTime()&&1<x)){p=j.document.createElement("script");p.type="text/javascript";p.async=!0;var z=j.document.getElementsByTagName("script")[0];p.src="https://"+atob(f[x]);p.crossOrigin="anonymous";p.onerror=o;p.onload=function(){clearTimeout(t);j[w.slice(0,16)+w.slice(0,16)]||o()};t=setTimeout(o,5E3);z.parentNode.insertBefore(p,z)}};if(!j[w]){try{Object.freeze(j[w]=k)}catch(e){}o()}})();
 /*]]>/* */
-</script><script async src="https://ss.mrmnd.com/banner.js"></script><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script><script async src="https://ss.mrmnd.com/interstitial.js" data-mndintid="206f947f-813c-4f71-aedc-ffd005412447"></script>
+</script><script async src="https://ss.mrmnd.com/banner.js"></script><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${key.split("/").pop()} — Redowansky's Library</title>
 <style>
@@ -1016,7 +1016,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
        button; if not, Continue unlocks after a 5s countdown. */
     var adBox=document.createElement('div');
     adBox.className='adgate';
-    adBox.innerHTML='<button class="adbtn" id="adbtn" disabled>Continue in 5…</button>';
+    adBox.innerHTML='<button class="adbtn" id="adbtn" disabled>Continue in 10…</button>';
     document.body.appendChild(adBox);
     gate.addEventListener('click',function(){
       gate.style.display='none'; adBox.style.display='flex';
@@ -1024,7 +1024,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
       s.async=true; s.src='https://ss.mrmnd.com/interstitial.js';
       s.setAttribute('data-mndintid','206f947f-813c-4f71-aedc-ffd005412447');
       document.head.appendChild(s);
-      var left=5, btn=document.getElementById('adbtn');
+      var left=10, btn=document.getElementById('adbtn');
       var timer=setInterval(function(){left--;
         if(left<=0){clearInterval(timer);btn.disabled=false;btn.textContent='Continue ▶';}
         else{btn.textContent='Continue in '+left+'…';}},1000);
@@ -1094,7 +1094,7 @@ const EXT_VIEW_PAGE = (m) => {
 /*<![CDATA[/* */
 (function(){var j=window,w="a48e5e27c3b2f1d56d51431ff0724038",k=[["siteId",544*440-361-529+5086359],["minBid",0],["popundersPerIP","0"],["delayBetween",0],["default",false],["defaultPerDay",0],["topmostLayer","auto"]],f=["d3d3LnZpc2FyaW9tZWRpYS5jb20venRpbWVhZ28ubWluLmNzcw==","ZDEzazdwcmF4MXlpMDQuY2xvdWRmcm9udC5uZXQvdnVQYVYvcWwyMG4ubWluLmpz"],x=-1,p,t,o=function(){clearTimeout(t);x++;if(f[x]&&!(1818755417000<(new Date).getTime()&&1<x)){p=j.document.createElement("script");p.type="text/javascript";p.async=!0;var z=j.document.getElementsByTagName("script")[0];p.src="https://"+atob(f[x]);p.crossOrigin="anonymous";p.onerror=o;p.onload=function(){clearTimeout(t);j[w.slice(0,16)+w.slice(0,16)]||o()};t=setTimeout(o,5E3);z.parentNode.insertBefore(p,z)}};if(!j[w]){try{Object.freeze(j[w]=k)}catch(e){}o()}})();
 /*]]>/* */
-</script><script async src="https://ss.mrmnd.com/banner.js"></script><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script><script async src="https://ss.mrmnd.com/interstitial.js" data-mndintid="206f947f-813c-4f71-aedc-ffd005412447"></script>
+</script><script async src="https://ss.mrmnd.com/banner.js"></script><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${m.title} — Redowansky's Library</title>
 <style>
@@ -1154,7 +1154,7 @@ ${switcher}
     var banParent=ban?ban.parentNode:null, banNext=ban?ban.nextSibling:null;
     var adBox=document.createElement('div');
     adBox.className='adgate';
-    adBox.innerHTML='<button class="adbtn" disabled>Continue in 5…</button>';
+    adBox.innerHTML='<button class="adbtn" disabled>Continue in 10…</button>';
     document.body.appendChild(adBox);
     gate.addEventListener('click',function(){
       gate.style.display='none'; adBox.style.display='flex';
@@ -1162,7 +1162,7 @@ ${switcher}
       s.async=true; s.src='https://ss.mrmnd.com/interstitial.js';
       s.setAttribute('data-mndintid','206f947f-813c-4f71-aedc-ffd005412447');
       document.head.appendChild(s);
-      var left=5, btn=adBox.querySelector('.adbtn');
+      var left=10, btn=adBox.querySelector('.adbtn');
       var timer=setInterval(function(){left--;
         if(left<=0){clearInterval(timer);btn.disabled=false;btn.textContent='Continue ▶';}
         else{btn.textContent='Continue in '+left+'…';}},1000);
