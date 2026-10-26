@@ -985,11 +985,12 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 (function(){
   var vid=document.querySelector('.stage video');
   if(!vid)return;
-  /* Play-click ad gate, silent version: 1st overlay click lets the
+  /* Play-click ad gate, silent CineFreak pattern: click 1 = ad 1,
+     click 2 = ad 2, click 3 = play. Each overlay click lets the
      PopAds popunder fire (do NOT stopPropagation) with NO ad message
-     shown; 2nd click plays. Native controls are hidden until the gate
-     passes, so only the overlay ▶ is visible at first. After playback
-     starts the overlay stays hidden, so pause/resume is not re-gated. */
+     shown. Native controls are hidden until the gate passes, so only
+     the overlay ▶ is visible at first. After playback starts the
+     overlay stays hidden, so pause/resume is not re-gated. */
   var stage=document.querySelector('.stage');
   if(stage){
     stage.style.position='relative';
@@ -998,9 +999,10 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
     gate.className='playgate';
     gate.innerHTML='<div class="pgbtn">▶</div><div class="pgtxt">Click to play</div>';
     stage.appendChild(gate);
-    var adDone=false;
+    var adClicks=0;
     gate.addEventListener('click',function(){
-      if(!adDone){adDone=true;return;}
+      adClicks++;
+      if(adClicks<3)return;
       gate.style.display='none';
       vid.setAttribute('controls','');
       try{vid.play();}catch(e){}
@@ -1090,11 +1092,12 @@ ${switcher}
 <div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div>
 <script>
 (function(){
-  /* Play-click ad gate, silent version: 1st click lets PopAds fire
-     (no stopPropagation) with NO ad message shown, 2nd click plays /
-     reveals the player. Native video controls are hidden until the
-     gate passes, so only the overlay ▶ is visible at first (the opaque
-     overlay also hides Drive iframe controls). Re-runnable so
+  /* Play-click ad gate, silent CineFreak pattern: click 1 = ad 1,
+     click 2 = ad 2, click 3 = play / reveals the player. Each overlay
+     click lets PopAds fire (no stopPropagation) with NO ad message
+     shown. Native video controls are hidden until the gate passes,
+     so only the overlay ▶ is visible at first (the opaque overlay
+     also hides Drive iframe controls). Re-runnable so
      source-switching (setSrc) re-gates the new player. */
   window.initPlayGate=function(){
     var stage=document.getElementById('extstage');
@@ -1110,9 +1113,10 @@ ${switcher}
     gate.className='playgate';
     gate.innerHTML='<div class="pgbtn">▶</div><div class="pgtxt">Click to play</div>';
     wrap.appendChild(gate);
-    var adDone=false;
+    var adClicks=0;
     gate.addEventListener('click',function(){
-      if(!adDone){adDone=true;return;}
+      adClicks++;
+      if(adClicks<3)return;
       gate.style.display='none';
       if(media.tagName==='VIDEO'){media.setAttribute('controls','');try{media.play();}catch(e){}}
     });
