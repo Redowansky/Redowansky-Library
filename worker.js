@@ -952,7 +952,8 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 .playgate{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#000;cursor:pointer}
 .pgbtn{font-size:4rem;color:#00e676;text-shadow:0 2px 20px rgba(0,230,118,.5)}
 .pgtxt{font-size:.9rem;color:#e8f5e9}
-.adgate{position:absolute;inset:0;z-index:10;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#000;padding:16px;text-align:center}
+.adgate{position:fixed;inset:0;z-index:9999;display:none;flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;background:#000;padding:60px 16px 24px;overflow-y:auto;text-align:center}
+.adclose{position:fixed;top:14px;right:16px;z-index:10000;width:44px;height:44px;border-radius:50%;background:#1e3a2a;color:#fff;font-size:1.4rem;border:none;cursor:pointer}
 .adlabel{font-size:.85rem;color:#7a9a85;letter-spacing:.08em}
 .adbtn{background:#00c853;color:#fff;border:none;font-weight:700;font-size:1rem;padding:12px 32px;border-radius:12px;cursor:pointer}
 </style></head><body>
@@ -1006,8 +1007,8 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
     stage.appendChild(gate);
     var adBox=document.createElement('div');
     adBox.className='adgate';
-    adBox.innerHTML='<div class="adlabel" id="adlabel">Sponsored • Ad 1 of 2</div><div id="adbanwrap"></div><button class="adbtn" id="adbtn">Continue ▶</button>';
-    stage.appendChild(adBox);
+    adBox.innerHTML='<button class="adclose" id="adclose">✕</button><div class="adlabel" id="adlabel">Sponsored • Ad 1 of 2</div><div id="adbanwrap"></div><button class="adbtn" id="adbtn">Continue ▶</button>';
+    document.body.appendChild(adBox);
     var ban=document.querySelector('[data-mndbanid]');
     var banParent=ban?ban.parentNode:null, banNext=ban?ban.nextSibling:null;
     var adStep=0;
@@ -1024,9 +1025,9 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
       try{vid.play();}catch(e){}
     }
     gate.addEventListener('click',function(){showAd(1);});
-    document.getElementById('adbtn').addEventListener('click',function(){
-      if(adStep===1){showAd(2);}else{finishAd();}
-    });
+    function adAdvance(){if(adStep===1){showAd(2);}else{finishAd();}}
+    document.getElementById('adbtn').addEventListener('click',adAdvance);
+    document.getElementById('adclose').addEventListener('click',adAdvance);
     vid.addEventListener('play',function(){gate.style.display='none';adBox.style.display='none';vid.setAttribute('controls','');});
   }
   var start=parseInt(new URLSearchParams(location.search).get('start')||'0',10);
@@ -1102,7 +1103,8 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 .playgate{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#000;cursor:pointer}
 .pgbtn{font-size:4rem;color:#00e676;text-shadow:0 2px 20px rgba(0,230,118,.5)}
 .pgtxt{font-size:.9rem;color:#e8f5e9}
-.adgate{position:absolute;inset:0;z-index:10;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#000;padding:16px;text-align:center}
+.adgate{position:fixed;inset:0;z-index:9999;display:none;flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;background:#000;padding:60px 16px 24px;overflow-y:auto;text-align:center}
+.adclose{position:fixed;top:14px;right:16px;z-index:10000;width:44px;height:44px;border-radius:50%;background:#1e3a2a;color:#fff;font-size:1.4rem;border:none;cursor:pointer}
 .adlabel{font-size:.85rem;color:#7a9a85;letter-spacing:.08em}
 .adbtn{background:#00c853;color:#fff;border:none;font-weight:700;font-size:1rem;padding:12px 32px;border-radius:12px;cursor:pointer}
 </style></head><body>
@@ -1129,7 +1131,7 @@ ${switcher}
     if(!stage||!stage.parentNode)return;
     var old=stage.parentNode.querySelector('.playgate');
     if(old)old.remove();
-    var oldAd=stage.parentNode.querySelector('.adgate');
+    var oldAd=document.querySelector('.adgate');
     if(oldAd){
       var banInAd=oldAd.querySelector('[data-mndbanid]');
       if(banInAd)document.body.appendChild(banInAd);
@@ -1147,8 +1149,8 @@ ${switcher}
     wrap.appendChild(gate);
     var adBox=document.createElement('div');
     adBox.className='adgate';
-    adBox.innerHTML='<div class="adlabel">Sponsored • Ad 1 of 2</div><div class="adbanwrap"></div><button class="adbtn">Continue ▶</button>';
-    wrap.appendChild(adBox);
+    adBox.innerHTML='<button class="adclose">✕</button><div class="adlabel">Sponsored • Ad 1 of 2</div><div class="adbanwrap"></div><button class="adbtn">Continue ▶</button>';
+    document.body.appendChild(adBox);
     var banParent=ban?ban.parentNode:null, banNext=ban?ban.nextSibling:null;
     var adStep=0;
     function showAd(step){
@@ -1163,9 +1165,9 @@ ${switcher}
       if(media.tagName==='VIDEO'){media.setAttribute('controls','');try{media.play();}catch(e){}}
     }
     gate.addEventListener('click',function(){showAd(1);});
-    adBox.querySelector('.adbtn').addEventListener('click',function(){
-      if(adStep===1){showAd(2);}else{finishAd();}
-    });
+    function adAdvance(){if(adStep===1){showAd(2);}else{finishAd();}}
+    adBox.querySelector('.adbtn').addEventListener('click',adAdvance);
+    adBox.querySelector('.adclose').addEventListener('click',adAdvance);
     if(media.tagName==='VIDEO')media.addEventListener('play',function(){gate.style.display='none';adBox.style.display='none';media.setAttribute('controls','');});
   };
   window.initPlayGate();
