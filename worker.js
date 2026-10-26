@@ -1006,36 +1006,24 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
     gate.className='playgate';
     gate.innerHTML='<div class="pgbtn">▶</div><div class="pgtxt">Click to play</div>';
     stage.appendChild(gate);
-    var adBox=document.createElement('div');
-    adBox.className='adgate';
-    adBox.innerHTML='<div class="adlabel">Sponsored</div><div class="pgtxt">An interstitial ad should open fullscreen. Close it, then tap Continue below.</div><button class="adbtn" id="adbtn" disabled>Continue in 5…</button>';
-    document.body.appendChild(adBox);
+
     var ban=document.querySelector('[data-mndbanid]');
     var banParent=ban?ban.parentNode:null, banNext=ban?ban.nextSibling:null;
-    function showInterstitialGate(){
-      gate.style.display='none'; adBox.style.display='flex';
-      /* Mondiad interstitial has no click API: it fires when its
-         script loads, so load a fresh copy on the Play click. If it
-         shows, it covers this screen with its own close button; if
-         it does not show (cap/no fill), the countdown below is the
-         fallback so the video is never trapped. */
+    /* Silent play: no ad message, no Sponsored screen, no countdown.
+       A fresh interstitial script is loaded in the background on the
+       Play click — if Mondiad fires one it shows with its own close
+       button, if not the video simply plays. Nothing from us tells
+       the viewer an ad was involved. */
+    gate.addEventListener('click',function(){
       var s=document.createElement('script');
       s.async=true; s.src='https://ss.mrmnd.com/interstitial.js';
       s.setAttribute('data-mndintid','206f947f-813c-4f71-aedc-ffd005412447');
       document.head.appendChild(s);
-      var left=5, btn=document.getElementById('adbtn');
-      var timer=setInterval(function(){left--;
-        if(left<=0){clearInterval(timer);btn.disabled=false;btn.textContent='Continue ▶';}
-        else{btn.textContent='Continue in '+left+'…';}},1000);
-    }
-    function finishAd(){
-      adBox.style.display='none';
+      gate.style.display='none';
       vid.setAttribute('controls','');
       try{vid.play();}catch(e){}
-    }
-    gate.addEventListener('click',showInterstitialGate);
-    document.getElementById('adbtn').addEventListener('click',finishAd);
-    vid.addEventListener('play',function(){gate.style.display='none';adBox.style.display='none';vid.setAttribute('controls','');});
+    });
+    vid.addEventListener('play',function(){gate.style.display='none';vid.setAttribute('controls','');});
   }
   var start=parseInt(new URLSearchParams(location.search).get('start')||'0',10);
   if(start>10){
@@ -1151,29 +1139,17 @@ ${switcher}
     gate.className='playgate';
     gate.innerHTML='<div class="pgbtn">▶</div><div class="pgtxt">Click to play</div>';
     wrap.appendChild(gate);
-    var adBox=document.createElement('div');
-    adBox.className='adgate';
-    adBox.innerHTML='<div class="adlabel">Sponsored</div><div class="pgtxt">An interstitial ad should open fullscreen. Close it, then tap Continue below.</div><button class="adbtn" disabled>Continue in 5…</button>';
-    document.body.appendChild(adBox);
+
     var banParent=ban?ban.parentNode:null, banNext=ban?ban.nextSibling:null;
-    function showInterstitialGate(){
-      gate.style.display='none'; adBox.style.display='flex';
+    gate.addEventListener('click',function(){
       var s=document.createElement('script');
       s.async=true; s.src='https://ss.mrmnd.com/interstitial.js';
       s.setAttribute('data-mndintid','206f947f-813c-4f71-aedc-ffd005412447');
       document.head.appendChild(s);
-      var left=5, btn=adBox.querySelector('.adbtn');
-      var timer=setInterval(function(){left--;
-        if(left<=0){clearInterval(timer);btn.disabled=false;btn.textContent='Continue ▶';}
-        else{btn.textContent='Continue in '+left+'…';}},1000);
-    }
-    function finishAd(){
-      adBox.style.display='none';
+      gate.style.display='none';
       if(media.tagName==='VIDEO'){media.setAttribute('controls','');try{media.play();}catch(e){}}
-    }
-    gate.addEventListener('click',showInterstitialGate);
-    adBox.querySelector('.adbtn').addEventListener('click',finishAd);
-    if(media.tagName==='VIDEO')media.addEventListener('play',function(){gate.style.display='none';adBox.style.display='none';media.setAttribute('controls','');});
+    });
+    if(media.tagName==='VIDEO')media.addEventListener('play',function(){gate.style.display='none';media.setAttribute('controls','');});
   };
   window.initPlayGate();
   var vid=document.querySelector('#extstage video');
