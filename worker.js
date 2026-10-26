@@ -949,7 +949,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 .btn{display:inline-block;background:#00c853;color:#fff;text-decoration:none;font-weight:700;padding:12px 32px;border-radius:12px}
 .btn.ghost{background:#0c1410;border:1px solid #1e3a2a;color:#e8f5e9}
 .adslot{width:100%;max-width:900px;background:#0a120c;border:1px dashed #1e3a2a;border-radius:12px;min-height:90px;display:flex;align-items:center;justify-content:center;color:#2a4a35;font-size:.8rem;margin-top:16px}
-.playgate{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(0,0,0,.45);cursor:pointer}
+.playgate{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#000;cursor:pointer}
 .pgbtn{font-size:4rem;color:#00e676;text-shadow:0 2px 20px rgba(0,230,118,.5)}
 .pgtxt{font-size:.9rem;color:#e8f5e9}
 </style></head><body>
@@ -985,24 +985,27 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 (function(){
   var vid=document.querySelector('.stage video');
   if(!vid)return;
-  /* Play-click ad gate: 1st overlay click lets the PopAds popunder fire
-     (do NOT stopPropagation) and only changes the hint; 2nd click plays.
-     After playback starts the overlay stays hidden, so pause/resume
-     via native controls is not re-gated. */
+  /* Play-click ad gate, silent version: 1st overlay click lets the
+     PopAds popunder fire (do NOT stopPropagation) with NO ad message
+     shown; 2nd click plays. Native controls are hidden until the gate
+     passes, so only the overlay ▶ is visible at first. After playback
+     starts the overlay stays hidden, so pause/resume is not re-gated. */
   var stage=document.querySelector('.stage');
   if(stage){
     stage.style.position='relative';
+    vid.removeAttribute('controls');
     var gate=document.createElement('div');
     gate.className='playgate';
     gate.innerHTML='<div class="pgbtn">▶</div><div class="pgtxt">Click to play</div>';
     stage.appendChild(gate);
     var adDone=false;
     gate.addEventListener('click',function(){
-      if(!adDone){adDone=true;gate.querySelector('.pgtxt').textContent='Ad opened — click Play again to watch';return;}
+      if(!adDone){adDone=true;return;}
       gate.style.display='none';
+      vid.setAttribute('controls','');
       try{vid.play();}catch(e){}
     });
-    vid.addEventListener('play',function(){gate.style.display='none';});
+    vid.addEventListener('play',function(){gate.style.display='none';vid.setAttribute('controls','');});
   }
   var start=parseInt(new URLSearchParams(location.search).get('start')||'0',10);
   if(start>10){
@@ -1074,7 +1077,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 .stage{width:100%;max-width:900px;background:#0c1410;border:1px solid #1e3a2a;border-radius:16px;overflow:hidden}
 .stage video{width:100%;max-height:70vh;background:#000}
 .note{width:100%;max-width:900px;color:#7a9a85;font-size:.85rem;margin-top:12px;text-align:center}
-.playgate{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(0,0,0,.45);cursor:pointer}
+.playgate{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#000;cursor:pointer}
 .pgbtn{font-size:4rem;color:#00e676;text-shadow:0 2px 20px rgba(0,230,118,.5)}
 .pgtxt{font-size:.9rem;color:#e8f5e9}
 </style></head><body>
@@ -1087,9 +1090,12 @@ ${switcher}
 <div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div>
 <script>
 (function(){
-  /* Play-click ad gate, same as VIEW_PAGE: 1st click lets PopAds fire
-     (no stopPropagation), 2nd click plays / reveals the player.
-     Re-runnable so source-switching (setSrc) re-gates the new player. */
+  /* Play-click ad gate, silent version: 1st click lets PopAds fire
+     (no stopPropagation) with NO ad message shown, 2nd click plays /
+     reveals the player. Native video controls are hidden until the
+     gate passes, so only the overlay ▶ is visible at first (the opaque
+     overlay also hides Drive iframe controls). Re-runnable so
+     source-switching (setSrc) re-gates the new player. */
   window.initPlayGate=function(){
     var stage=document.getElementById('extstage');
     if(!stage||!stage.parentNode)return;
@@ -1097,6 +1103,7 @@ ${switcher}
     if(old)old.remove();
     var media=stage.querySelector('video,iframe');
     if(!media)return;
+    if(media.tagName==='VIDEO')media.removeAttribute('controls');
     var wrap=stage.parentNode;
     wrap.style.position='relative';
     var gate=document.createElement('div');
@@ -1105,11 +1112,11 @@ ${switcher}
     wrap.appendChild(gate);
     var adDone=false;
     gate.addEventListener('click',function(){
-      if(!adDone){adDone=true;gate.querySelector('.pgtxt').textContent='Ad opened — click Play again to watch';return;}
+      if(!adDone){adDone=true;return;}
       gate.style.display='none';
-      if(media.tagName==='VIDEO'){try{media.play();}catch(e){}}
+      if(media.tagName==='VIDEO'){media.setAttribute('controls','');try{media.play();}catch(e){}}
     });
-    if(media.tagName==='VIDEO')media.addEventListener('play',function(){gate.style.display='none';});
+    if(media.tagName==='VIDEO')media.addEventListener('play',function(){gate.style.display='none';media.setAttribute('controls','');});
   };
   window.initPlayGate();
   var vid=document.querySelector('#extstage video');
