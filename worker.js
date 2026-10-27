@@ -136,7 +136,8 @@ const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script
 </script><meta name="mnd-ver" content="gjfr65hhptrjchm0g4gugw" /><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script><script async src="https://ss.mrmnd.com/banner.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="Redowansky's Library — free movie and video song streaming: Hollywood and Bollywood films with Continue Watching and resume across devices.">
-<title>Redowansky's Library — Movies & Songs</title>
+<link rel="canonical" href="https://redowansky.bond/">
+<title>Redowansky's Library — Hollywood &amp; Bollywood Movies &amp; Songs</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--grn:#00e676;--bg:#060906}
@@ -935,6 +936,8 @@ const VIEW_PAGE = (bucket, key, kind) => `<!DOCTYPE html><html lang="en"><head><
 </script><script async src="https://ss.mrmnd.com/banner.js"></script><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${key.split("/").pop()} — Redowansky's Library</title>
+<meta name="description" content="Watch ${key.split("/").pop()} on Redowansky's Library.">
+<link rel="canonical" href="https://redowansky.bond/view/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")}">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:20px}
@@ -1056,6 +1059,16 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 </script></body></html>`;
 const EXT_VIEW_PAGE = (m) => {
   const sources = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
+  const escHtml = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const seoLang = (sources[0] && sources[0].label && sources[0].label !== "Default" && sources[0].label !== "Video") ? sources[0].label : "";
+  const seoYear = m.year ? String(m.year) : "";
+  const seoTitleText = (m.title || "Untitled") + (seoYear ? " (" + seoYear + ")" : "") + (seoLang && m.type !== "song" ? " " + seoLang : "");
+  const seoTitle = seoTitleText + " — Redowansky's Library";
+  const seoDesc = m.overview ? String(m.overview).replace(/\s+/g, " ").trim().slice(0, 155) : ("Watch " + seoTitleText + " on Redowansky's Library — free streaming.");
+  const seoCanon = "https://redowansky.bond/view/ext/" + m.id;
+  const seoPoster = m.poster ? (String(m.poster).startsWith("http") ? m.poster : "https://image.tmdb.org/t/p/w500" + m.poster) : "";
+  const seoMetaLine = [seoYear, seoLang, (m.genres || []).join(" · "), m.type === "song" ? "Video Song" : "Movie", m.vote ? "★ " + m.vote : ""].filter(Boolean).join(" · ");
+  const seoSchema = { "@context": "https://schema.org", "@type": m.type === "song" ? "VideoObject" : "Movie", name: m.title || "", description: seoDesc, url: seoCanon, ...(seoYear ? { datePublished: seoYear + "-01-01" } : {}), ...(m.genres && m.genres.length ? { genre: m.genres } : {}), ...(seoPoster ? { image: seoPoster } : {}), ...(m.vote ? { aggregateRating: { "@type": "AggregateRating", ratingValue: String(m.vote), bestRating: "10" } } : {}) };
   const isDrive = (u) => u.indexOf("google.com") >= 0 && /[?&]id=([a-zA-Z0-9_-]+)/.test(u);
   const driveId = (u) => { const x = u.match(/[?&]id=([a-zA-Z0-9_-]+)/); return x ? x[1] : null; };
   const playerFor = (u) => isDrive(u)
@@ -1096,7 +1109,15 @@ const EXT_VIEW_PAGE = (m) => {
 /*]]>/* */
 </script><script async src="https://ss.mrmnd.com/banner.js"></script><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${m.title} — Redowansky's Library</title>
+<title>${escHtml(seoTitle)}</title>
+<meta name="description" content="${escHtml(seoDesc)}">
+<link rel="canonical" href="${seoCanon}">
+<meta property="og:title" content="${escHtml(seoTitle)}">
+<meta property="og:description" content="${escHtml(seoDesc)}">
+<meta property="og:type" content="video.other">
+<meta property="og:url" content="${seoCanon}">
+${seoPoster ? `<meta property="og:image" content="${escHtml(seoPoster)}">` : ""}
+<script type="application/ld+json">${JSON.stringify(seoSchema)}</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:20px}
@@ -1118,6 +1139,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 <div class="top"><a href="/">← Library</a><h1>${m.title}</h1></div>
 ${switcher}
 <div class="stage">${player}</div>
+${(m.overview || seoMetaLine) ? `<div style="width:100%;max-width:900px;margin-top:16px;color:#b8d8c0;font-size:.95rem;line-height:1.5">${m.overview ? `<p>${escHtml(m.overview)}</p>` : ""}${seoMetaLine ? `<div style="color:#7a9a85;font-size:.85rem;margin-top:8px">${escHtml(seoMetaLine)}</div>` : ""}</div>` : ""}
 <div style="margin-top:16px;text-align:center"><a id="dlbtn" href="/gate/ext/${m.id}" style="display:inline-block;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;text-decoration:none;font-weight:700;font-size:1rem;padding:13px 38px;border-radius:14px;box-shadow:0 8px 26px rgba(0,230,118,.35)">⭳ Download</a></div>
 <p class="note">🔗 streamed from external host</p>
 <div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
@@ -1734,6 +1756,12 @@ export class TunnelDO {
       // Public: list all movies with metadata
       if (path === "/api/movies" && request.method === "GET") {
         return json({ movies: await this.listMovies(env) });
+      }
+      // Public: robots.txt — standard crawler lines + sitemap pointer.
+      // Note: if Cloudflare's own AI-signal robots.txt takes precedence at
+      // the edge, that is a dashboard setting, not this Worker — verify live.
+      if (path === "/robots.txt" && request.method === "GET") {
+        return new Response("User-agent: *\nAllow: /\n\nSitemap: https://redowansky.bond/sitemap.xml\n", { headers: { "content-type": "text/plain;charset=utf-8", "cache-control": "public, max-age=3600" } });
       }
       // Public: sitemap generated from the live catalog (home + one view page per title)
       if (path === "/sitemap.xml" && request.method === "GET") {
