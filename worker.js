@@ -1566,6 +1566,12 @@ export class TunnelDO {
       return Response.redirect("https://pub-89e47025e7844f1eaf672a00cfdbba12.r2.dev/app/RedowanskyLibrary.apk", 302);
     }
 
+    // AdMob provider test APK (2026-10-28): separate package, does not
+    // touch the library app. Same /apk pattern, separate route.
+    if (path === "/apk-test") {
+      return Response.redirect("https://pub-89e47025e7844f1eaf672a00cfdbba12.r2.dev/app/AdMobTest.apk", 302);
+    }
+
     // ---- Google sync: auth + progress (before the S3 gate below) ----
     if (path === "/auth/login" && request.method === "GET") {
       if (!env.GOOGLE_CLIENT_SECRET) return new Response("Google sign-in is not configured yet (client secret missing)", { status: 503 });
