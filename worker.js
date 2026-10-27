@@ -1558,6 +1558,14 @@ export class TunnelDO {
       return json({ tunnel: this.tunnelWs() ? "up" : "down" });
     }
 
+    // ---- Direct APK link (2026-10-28): permanent download link for
+    // the latest app build, usable when the in-app updater can't run
+    // (e.g. the app crashes on launch). 302, not 301, so the target
+    // can move later without browsers caching a stale redirect.
+    if (path === "/apk") {
+      return Response.redirect("https://pub-89e47025e7844f1eaf672a00cfdbba12.r2.dev/app/RedowanskyLibrary.apk", 302);
+    }
+
     // ---- Google sync: auth + progress (before the S3 gate below) ----
     if (path === "/auth/login" && request.method === "GET") {
       if (!env.GOOGLE_CLIENT_SECRET) return new Response("Google sign-in is not configured yet (client secret missing)", { status: 503 });
