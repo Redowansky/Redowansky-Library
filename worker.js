@@ -129,11 +129,8 @@ function progressId(raw) {
 }
 
 // ---- PAGE (public read-only library) ----
-const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script type="text/javascript" data-cfasync="false">
-/*<![CDATA[/* */
-(function(){var j=window,w="a48e5e27c3b2f1d56d51431ff0724038",k=[["siteId",544*440-361-529+5086359],["minBid",0],["popundersPerIP","0"],["delayBetween",0],["default",false],["defaultPerDay",0],["topmostLayer","auto"]],f=["d3d3LnZpc2FyaW9tZWRpYS5jb20venRpbWVhZ28ubWluLmNzcw==","ZDEzazdwcmF4MXlpMDQuY2xvdWRmcm9udC5uZXQvdnVQYVYvcWwyMG4ubWluLmpz"],x=-1,p,t,o=function(){clearTimeout(t);x++;if(f[x]&&!(1818755417000<(new Date).getTime()&&1<x)){p=j.document.createElement("script");p.type="text/javascript";p.async=!0;var z=j.document.getElementsByTagName("script")[0];p.src="https://"+atob(f[x]);p.crossOrigin="anonymous";p.onerror=o;p.onload=function(){clearTimeout(t);j[w.slice(0,16)+w.slice(0,16)]||o()};t=setTimeout(o,5E3);z.parentNode.insertBefore(p,z)}};if(!j[w]){try{Object.freeze(j[w]=k)}catch(e){}o()}})();
-/*]]>/* */
-</script><meta name="mnd-ver" content="gjfr65hhptrjchm0g4gugw" /><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script><script async src="https://ss.mrmnd.com/banner.js"></script>
+const PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="mnd-ver" content="gjfr65hhptrjchm0g4gugw" /><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script><script async src="https://ss.mrmnd.com/banner.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="Redowansky's Library — free movie and video song streaming: Hollywood and Bollywood films with Continue Watching and resume across devices.">
 <link rel="canonical" href="https://redowansky.bond/">
@@ -929,11 +926,8 @@ mp3:"audio/mpeg",ogg:"audio/ogg",wav:"audio/wav",m4a:"audio/mp4",flac:"audio/fla
 pdf:"application/pdf",txt:"text/plain",json:"application/json",zip:"application/zip"};return m[e]||"application/octet-stream";}
 
 // ---- Media viewer page ----
-const VIEW_PAGE = (bucket, key, kind) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script type="text/javascript" data-cfasync="false">
-/*<![CDATA[/* */
-(function(){var j=window,w="a48e5e27c3b2f1d56d51431ff0724038",k=[["siteId",544*440-361-529+5086359],["minBid",0],["popundersPerIP","0"],["delayBetween",0],["default",false],["defaultPerDay",0],["topmostLayer","auto"]],f=["d3d3LnZpc2FyaW9tZWRpYS5jb20venRpbWVhZ28ubWluLmNzcw==","ZDEzazdwcmF4MXlpMDQuY2xvdWRmcm9udC5uZXQvdnVQYVYvcWwyMG4ubWluLmpz"],x=-1,p,t,o=function(){clearTimeout(t);x++;if(f[x]&&!(1818755417000<(new Date).getTime()&&1<x)){p=j.document.createElement("script");p.type="text/javascript";p.async=!0;var z=j.document.getElementsByTagName("script")[0];p.src="https://"+atob(f[x]);p.crossOrigin="anonymous";p.onerror=o;p.onload=function(){clearTimeout(t);j[w.slice(0,16)+w.slice(0,16)]||o()};t=setTimeout(o,5E3);z.parentNode.insertBefore(p,z)}};if(!j[w]){try{Object.freeze(j[w]=k)}catch(e){}o()}})();
-/*]]>/* */
-</script><script async src="https://ss.mrmnd.com/banner.js"></script><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script>
+const VIEW_PAGE = (bucket, key, kind) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<script async src="https://ss.mrmnd.com/banner.js"></script><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${key.split("/").pop()} — Redowansky's Library</title>
 <meta name="description" content="Watch ${key.split("/").pop()} on Redowansky's Library.">
@@ -1103,11 +1097,8 @@ const EXT_VIEW_PAGE = (m) => {
       </script>`
     : "";
   const player = `<div id="extstage">${playerFor(sources[0].url)}</div>`;
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script type="text/javascript" data-cfasync="false">
-/*<![CDATA[/* */
-(function(){var j=window,w="a48e5e27c3b2f1d56d51431ff0724038",k=[["siteId",544*440-361-529+5086359],["minBid",0],["popundersPerIP","0"],["delayBetween",0],["default",false],["defaultPerDay",0],["topmostLayer","auto"]],f=["d3d3LnZpc2FyaW9tZWRpYS5jb20venRpbWVhZ28ubWluLmNzcw==","ZDEzazdwcmF4MXlpMDQuY2xvdWRmcm9udC5uZXQvdnVQYVYvcWwyMG4ubWluLmpz"],x=-1,p,t,o=function(){clearTimeout(t);x++;if(f[x]&&!(1818755417000<(new Date).getTime()&&1<x)){p=j.document.createElement("script");p.type="text/javascript";p.async=!0;var z=j.document.getElementsByTagName("script")[0];p.src="https://"+atob(f[x]);p.crossOrigin="anonymous";p.onerror=o;p.onload=function(){clearTimeout(t);j[w.slice(0,16)+w.slice(0,16)]||o()};t=setTimeout(o,5E3);z.parentNode.insertBefore(p,z)}};if(!j[w]){try{Object.freeze(j[w]=k)}catch(e){}o()}})();
-/*]]>/* */
-</script><script async src="https://ss.mrmnd.com/banner.js"></script><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script>
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<script async src="https://ss.mrmnd.com/banner.js"></script><script async src="https://ss.mrmnd.com/static/f53498a9-9861-49d1-b571-67c892585b0a.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escHtml(seoTitle)}</title>
 <meta name="description" content="${escHtml(seoDesc)}">
@@ -1257,11 +1248,8 @@ async function hmacHex(key, msg) {
   const s = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(msg));
   return [...new Uint8Array(s)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-const GATE_PAGE = (title, sub, desc, labels, src0) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><script type="text/javascript" data-cfasync="false">
-/*<![CDATA[/* */
-(function(){var j=window,w="a48e5e27c3b2f1d56d51431ff0724038",k=[["siteId",544*440-361-529+5086359],["minBid",0],["popundersPerIP","0"],["delayBetween",0],["default",false],["defaultPerDay",0],["topmostLayer","auto"]],f=["d3d3LnZpc2FyaW9tZWRpYS5jb20venRpbWVhZ28ubWluLmNzcw==","ZDEzazdwcmF4MXlpMDQuY2xvdWRmcm9udC5uZXQvdnVQYVYvcWwyMG4ubWluLmpz"],x=-1,p,t,o=function(){clearTimeout(t);x++;if(f[x]&&!(1818755417000<(new Date).getTime()&&1<x)){p=j.document.createElement("script");p.type="text/javascript";p.async=!0;var z=j.document.getElementsByTagName("script")[0];p.src="https://"+atob(f[x]);p.crossOrigin="anonymous";p.onerror=o;p.onload=function(){clearTimeout(t);j[w.slice(0,16)+w.slice(0,16)]||o()};t=setTimeout(o,5E3);z.parentNode.insertBefore(p,z)}};if(!j[w]){try{Object.freeze(j[w]=k)}catch(e){}o()}})();
-/*]]>/* */
-</script><script async src="https://ss.mrmnd.com/banner.js"></script>
+const GATE_PAGE = (title, sub, desc, labels, src0) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<script async src="https://ss.mrmnd.com/banner.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Download ${title} — Redowansky's Library</title>
 <style>
