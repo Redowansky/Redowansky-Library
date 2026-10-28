@@ -337,7 +337,7 @@ function openModal(m){
 function closeModal(){$('modal').classList.remove('open');}
 $('modal').onclick=e=>{if(e.target.id==='modal')closeModal();};
 load();loadSync();
-</script><div style="text-align:center;padding:16px 12px"><script async="async" data-cfasync="false" src="https://bancadeltempoidea.org/21/c35f8b781378782fafde0559fab8e6cd"></script><div id="container-c35f8b781378782fafde0559fab8e6cd"></div></div><footer style="text-align:center;padding:28px 12px 36px;color:#5f7a68;font-size:.85rem">👀 __VIEWS_TODAY__ viewers today</footer><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script></body></html>`;
+</script><footer style="text-align:center;padding:28px 12px 36px;color:#5f7a68;font-size:.85rem">👀 __VIEWS_TODAY__ viewers today</footer><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script></body></html>`;
 
 // ---- TMDB helpers ----
 function toDirectUrlSrv(u){
