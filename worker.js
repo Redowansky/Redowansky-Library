@@ -1132,7 +1132,12 @@ const EXT_VIEW_PAGE = (m) => {
   const seoCanon = "https://redowansky.bond/view/ext/" + m.id;
   const seoPoster = m.poster ? (String(m.poster).startsWith("http") ? m.poster : "https://image.tmdb.org/t/p/w500" + m.poster) : "";
   const seoMetaLine = [seoYear, seoLang, (m.genres || []).join(" · "), m.type === "song" ? "Video Song" : "Movie", m.vote ? "★ " + m.vote : ""].filter(Boolean).join(" · ");
-  const seoSchema = { "@context": "https://schema.org", "@type": m.type === "song" ? "VideoObject" : "Movie", name: m.title || "", description: seoDesc, url: seoCanon, ...(seoYear ? { datePublished: seoYear + "-01-01" } : {}), ...(m.genres && m.genres.length ? { genre: m.genres } : {}), ...(seoPoster ? { image: seoPoster } : {}), ...(m.vote ? { aggregateRating: { "@type": "AggregateRating", ratingValue: String(m.vote), bestRating: "10" } } : {}) };
+  // Schema fix 2026-10-28: no aggregateRating — the catalog stores only a
+  // rating average, never a ratingCount/reviewCount, and inventing a count
+  // would be fake data. No VideoObject for songs either — the catalog stores
+  // no uploadDate, and VideoObject requires it (plus thumbnailUrl/contentUrl).
+  // Movies keep a plain Movie schema; songs get no schema script at all.
+  const seoSchema = m.type === "song" ? null : { "@context": "https://schema.org", "@type": "Movie", name: m.title || "", description: seoDesc, url: seoCanon, ...(seoYear ? { datePublished: seoYear + "-01-01" } : {}), ...(m.genres && m.genres.length ? { genre: m.genres } : {}), ...(seoPoster ? { image: seoPoster } : {}) };
   const isDrive = (u) => u.indexOf("google.com") >= 0 && /[?&]id=([a-zA-Z0-9_-]+)/.test(u);
   const driveId = (u) => { const x = u.match(/[?&]id=([a-zA-Z0-9_-]+)/); return x ? x[1] : null; };
   const playerFor = (u) => isDrive(u)
@@ -1178,7 +1183,7 @@ const EXT_VIEW_PAGE = (m) => {
 <meta property="og:type" content="video.other">
 <meta property="og:url" content="${seoCanon}">
 ${seoPoster ? `<meta property="og:image" content="${escHtml(seoPoster)}">` : ""}
-<script type="application/ld+json">${JSON.stringify(seoSchema)}</script>
+${seoSchema ? `<script type="application/ld+json">${JSON.stringify(seoSchema)}</script>` : ""}
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:20px}
