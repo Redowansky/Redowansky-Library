@@ -211,7 +211,7 @@ section.row{padding:0 12px}
 .btn{padding:10px 20px;font-size:.9rem}
 .modal-box{margin:10px}
 }
-</style></head><body>
+</style><script data-cfasync="false" src="https://aarems.org/1/8a50be483ddba782392f8d2b164694b9"></script></head><body>
 <header id="hdr"><div class="logo" onclick="location.href='/'">🎬 Redowansky</div>
 <nav><a class="on" data-f="movie">Movies</a><a data-f="song">Video Songs</a></nav>
 <div class="search"><input id="q" placeholder="Search titles..." oninput="doSearch(this.value)"></div><div id="authbox"><a href="/auth/login" style="color:#00e676;text-decoration:none">Sign in with Google</a></div></header>
@@ -337,7 +337,7 @@ function openModal(m){
 function closeModal(){$('modal').classList.remove('open');}
 $('modal').onclick=e=>{if(e.target.id==='modal')closeModal();};
 load();loadSync();
-</script><footer style="text-align:center;padding:28px 12px 36px;color:#5f7a68;font-size:.85rem">👀 __VIEWS_TODAY__ viewers today</footer></body></html>`;
+</script><div style="text-align:center;padding:16px 12px"><script async="async" data-cfasync="false" src="https://bancadeltempoidea.org/21/c35f8b781378782fafde0559fab8e6cd"></script><div id="container-c35f8b781378782fafde0559fab8e6cd"></div></div><footer style="text-align:center;padding:28px 12px 36px;color:#5f7a68;font-size:.85rem">👀 __VIEWS_TODAY__ viewers today</footer><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script></body></html>`;
 
 // ---- TMDB helpers ----
 function toDirectUrlSrv(u){
@@ -954,7 +954,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 .adlabel{font-size:.85rem;color:#7a9a85;letter-spacing:.08em}
 .adbtn{background:#00c853;color:#fff;border:none;font-weight:700;font-size:1rem;padding:12px 32px;border-radius:12px;cursor:pointer}
 .adbtn:disabled{opacity:.5;cursor:default}
-</style></head><body>
+</style><script data-cfasync="false" src="https://aarems.org/1/8a50be483ddba782392f8d2b164694b9"></script></head><body>
 <div class="top"><a href="/">← Library</a><h1>${key.split("/").pop()}</h1></div>
 <div class="stage">${kind === "video" ? `
 <video controls controlsList="nodownload" preload="metadata" playsinline style="width:100%;max-height:70vh;background:#000" src="/d/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")}"></video>
@@ -1050,7 +1050,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
   vid.addEventListener('pause',function(){send(true);});
   window.addEventListener('beforeunload',function(){send(true);});
 })();
-</script></body></html>`;
+</script><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script></body></html>`;
 const EXT_VIEW_PAGE = (m) => {
   const sources = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
   const escHtml = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -1126,7 +1126,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 .adlabel{font-size:.85rem;color:#7a9a85;letter-spacing:.08em}
 .adbtn{background:#00c853;color:#fff;border:none;font-weight:700;font-size:1rem;padding:12px 32px;border-radius:12px;cursor:pointer}
 .adbtn:disabled{opacity:.5;cursor:default}
-</style></head><body>
+</style><script data-cfasync="false" src="https://aarems.org/1/8a50be483ddba782392f8d2b164694b9"></script></head><body>
 <div class="top"><a href="/">← Library</a><h1>${m.title}</h1></div>
 ${switcher}
 <div class="stage">${player}</div>
@@ -1206,7 +1206,7 @@ ${(m.overview || seoMetaLine) ? `<div style="width:100%;max-width:900px;margin-t
   vid.addEventListener('pause',function(){send(true);});
   window.addEventListener('beforeunload',function(){send(true);});
 })();
-</script></body></html>`;
+</script><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script></body></html>`;
 };
 function mediaKind(name){const e=name.split(".").pop().toLowerCase();
 if(["mp4","webm","mkv","avi","mov","m4v"].includes(e))return "video";
