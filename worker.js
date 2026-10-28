@@ -1840,6 +1840,12 @@ export class TunnelDO {
       if (path === "/robots.txt" && request.method === "GET") {
         return new Response("User-agent: *\nAllow: /\n\nSitemap: https://redowansky.bond/sitemap.xml\n", { headers: { "content-type": "text/plain;charset=utf-8", "cache-control": "public, max-age=3600" } });
       }
+      // Public: app-ads.txt — AdMob app verification for the unlisted
+      // "Redowansky Library" app (ca-app-pub-1642095506798662). AdMob
+      // crawls this when the app is submitted for verification.
+      if (path === "/app-ads.txt" && request.method === "GET") {
+        return new Response("google.com, pub-1642095506798662, DIRECT, f08c47fec0942fa0\n", { headers: { "content-type": "text/plain;charset=utf-8", "cache-control": "public, max-age=3600" } });
+      }
       // Public: sitemap generated from the live catalog (home + one view page per title)
       if (path === "/sitemap.xml" && request.method === "GET") {
         const movies = await this.listMovies(env);
