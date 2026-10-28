@@ -8,6 +8,76 @@ const REGION = "us-east-1";
 const SERVICE = "s3";
 const te = new TextEncoder();
 
+// ---------- AdBlock wall (home + view + ext-view) ----------
+// Strict wall: if an ad blocker is detected, a full-screen overlay blocks
+// the page until the visitor really disables it. The "I've disabled it"
+// button re-runs the same checks; if still blocked, the wall stays (loop).
+// Detection uses two signals: a bait element that content blockers hide
+// via cosmetic filtering, and a no-cors fetch probe to the ad domain
+// (network-level blockers reject it). A probe timeout counts as
+// inconclusive, not blocked, so a slow network alone never walls anyone.
+const ADBLOCK_WALL = `<div id="adblock-bait" class="ads adsbygoogle ad-banner adsbox" style="width:10px;height:10px;position:absolute;left:0;top:0;"></div>
+<div id="adblock-wall" style="display:none;position:fixed;inset:0;z-index:999999;background:#0b120e;color:#e8f0ea;text-align:center;padding:24px;overflow:auto;">
+<div style="max-width:440px;margin:18vh auto 0;">
+<div style="font-size:48px;">🛡️</div>
+<h2 style="margin:12px 0 8px;">Looks like you're using an AdBlocker</h2>
+<p style="color:#9db5a4;line-height:1.5;">Ads keep Redowansky Library free. Please disable your ad blocker for this site to continue.</p>
+<button id="adblock-check" style="margin-top:16px;padding:14px 28px;font-size:1.05rem;border:0;border-radius:10px;background:#2fbf71;color:#06130b;font-weight:700;cursor:pointer;">I've disabled it</button>
+<p style="color:#7d9484;font-size:.85rem;margin-top:14px;">After disabling, tap the button and we'll check again.</p>
+</div>
+</div>
+<script>
+(function(){
+  function baitBlocked(){
+    var b=document.getElementById('adblock-bait');
+    if(!b) return false;
+    try{
+      var cs=window.getComputedStyle(b);
+      if(cs.display==='none'||cs.visibility==='hidden') return true;
+    }catch(e){}
+    return b.offsetHeight===0;
+  }
+  function probeBlocked(cb){
+    var done=false;
+    function fin(v){ if(!done){done=true;cb(v);} }
+    try{
+      var c=new AbortController();
+      var t=setTimeout(function(){ c.abort(); fin(false); },3000);
+      fetch('https://aarems.org/1/8a50be483ddba782392f8d2b164694b9',{mode:'no-cors',signal:c.signal})
+        .then(function(){ clearTimeout(t); fin(false); })
+        .catch(function(){ clearTimeout(t); fin(true); });
+    }catch(e){ fin(false); }
+  }
+  function showWall(){
+    var w=document.getElementById('adblock-wall');
+    if(w) w.style.display='block';
+    document.body.style.overflow='hidden';
+  }
+  function hideWall(){
+    var w=document.getElementById('adblock-wall');
+    if(w) w.style.display='none';
+    document.body.style.overflow='';
+  }
+  function recheck(btn){
+    if(btn) btn.textContent='Checking…';
+    if(baitBlocked()){ if(btn) btn.textContent="I've disabled it"; return; }
+    probeBlocked(function(blocked){
+      if(blocked){ if(btn) btn.textContent="I've disabled it"; return; }
+      hideWall();
+      location.reload();
+    });
+  }
+  var btn=document.getElementById('adblock-check');
+  if(btn) btn.onclick=function(){ recheck(btn); };
+  window.addEventListener('load',function(){
+    setTimeout(function(){
+      if(baitBlocked()){ showWall(); return; }
+      probeBlocked(function(blocked){ if(blocked) showWall(); });
+    },600);
+  });
+})();
+</script>`;
+
 // ---------- SigV4 ----------
 async function sha256Hex(data) {
   const buf = await crypto.subtle.digest("SHA-256", data);
@@ -337,7 +407,7 @@ function openModal(m){
 function closeModal(){$('modal').classList.remove('open');}
 $('modal').onclick=e=>{if(e.target.id==='modal')closeModal();};
 load();loadSync();
-</script><footer style="text-align:center;padding:28px 12px 36px;color:#5f7a68;font-size:.85rem">👀 __VIEWS_TODAY__ viewers today</footer><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script></body></html>`;
+</script><footer style="text-align:center;padding:28px 12px 36px;color:#5f7a68;font-size:.85rem">👀 __VIEWS_TODAY__ viewers today</footer><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script>${ADBLOCK_WALL}</body></html>`;
 
 // ---- TMDB helpers ----
 function toDirectUrlSrv(u){
@@ -1050,7 +1120,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
   vid.addEventListener('pause',function(){send(true);});
   window.addEventListener('beforeunload',function(){send(true);});
 })();
-</script><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script></body></html>`;
+</script><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script>${ADBLOCK_WALL}</body></html>`;
 const EXT_VIEW_PAGE = (m) => {
   const sources = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
   const escHtml = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -1206,7 +1276,7 @@ ${(m.overview || seoMetaLine) ? `<div style="width:100%;max-width:900px;margin-t
   vid.addEventListener('pause',function(){send(true);});
   window.addEventListener('beforeunload',function(){send(true);});
 })();
-</script><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script></body></html>`;
+</script><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script>${ADBLOCK_WALL}</body></html>`;
 };
 function mediaKind(name){const e=name.split(".").pop().toLowerCase();
 if(["mp4","webm","mkv","avi","mov","m4v"].includes(e))return "video";
