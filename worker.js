@@ -1694,17 +1694,26 @@ export class TunnelDO {
       return json({ signedIn: true, name: s.name || "", email: s.email || "" });
     }
     if (path === "/api/progress" && request.method === "GET") {
-      const s = await sessionFromRequest(env, request);
-      if (!s) return json({ signedIn: false, entries: [] });
+      // Caller is either the site (session cookie) or the app (Bearer ID token) — same auth as POST.
+      let sub = null, name = "";
+      const sess = await sessionFromRequest(env, request);
+      if (sess) { sub = sess.sub; name = sess.name || ""; }
+      if (!sub) {
+        const auth = request.headers.get("Authorization") || "";
+        const tok = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        const user = await verifyGoogleIdToken(tok);
+        if (user) { sub = user.sub; name = user.name || ""; }
+      }
+      if (!sub) return json({ signedIn: false, entries: [] });
       try {
-        const list = await env.DATA_KV.list({ prefix: "progress:" + s.sub + ":" });
+        const list = await env.DATA_KV.list({ prefix: "progress:" + sub + ":" });
         const entries = [];
         for (const k of list.keys) {
           const v = await env.DATA_KV.get(k.name, "json");
           if (v) entries.push(v);
         }
         entries.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-        return json({ signedIn: true, name: s.name || "", entries });
+        return json({ signedIn: true, name, entries });
       } catch (e) { return json({ error: String(e.message || e) }, 500); }
     }
     if (path === "/api/progress" && request.method === "POST") {
