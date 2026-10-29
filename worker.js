@@ -1869,6 +1869,30 @@ export class TunnelDO {
       if (path === "/app-ads.txt" && request.method === "GET") {
         return new Response("google.com, pub-1642095506798662, DIRECT, f08c47fec0942fa0\n", { headers: { "content-type": "text/plain;charset=utf-8", "cache-control": "public, max-age=3600" } });
       }
+      // Public: privacy policy for the Redowansky Library app + site.
+      // Linked from the Amazon Appstore listing (apps that collect
+      // personal information must provide a policy URL).
+      if (path === "/privacy" && request.method === "GET") {
+        const html = "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+          + "<title>Privacy Policy — Redowansky Library</title>"
+          + "<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.6;color:#222}h1{font-size:24px}h2{font-size:18px;margin-top:28px}a{color:#0a6}</style></head><body>"
+          + "<h1>Privacy Policy — Redowansky Library</h1><p>Effective: October 30, 2026. This policy covers the Redowansky Library Android app and the redowansky.bond website.</p>"
+          + "<h2>Information we collect</h2><ul>"
+          + "<li><b>Account information (only if you sign in):</b> when you sign in with Google, we receive your name, email address and profile photo from Google. This runs your account and syncs your watch progress across devices.</li>"
+          + "<li><b>Watch progress and preferences:</b> what you watched, where you stopped, and your download list, so Continue Watching and sync work.</li>"
+          + "<li><b>Movie requests:</b> if you use “Ask for a Movie”, your message is stored and emailed to the developer so the request can be handled.</li>"
+          + "<li><b>Push notification token (only if you allow notifications):</b> a device token used to send notifications. No notification content is stored.</li>"
+          + "<li><b>Advertising identifiers:</b> the app shows ads from Google AdMob and Mondiad. Those ad partners may collect device information and advertising identifiers to serve ads, under their own privacy policies.</li>"
+          + "</ul><p>We do not collect payment information — there are no purchases inside the app.</p>"
+          + "<h2>How information is used</h2><p>To run the app, sync your progress, respond to your requests, send notifications you allowed, and show ads that keep the service free.</p>"
+          + "<h2>Sharing</h2><p>We do not sell your personal information. It is shared only with the service providers needed to run the app: Google (sign-in and sync) and the ad partners named above.</p>"
+          + "<h2>Your choices</h2><p>You can use the app without signing in — your progress then stays on your device only. You can ask us to delete your synced account data at any time by contacting us at the address below.</p>"
+          + "<h2>Children</h2><p>The app is not directed at children under 13, and we do not knowingly collect information from them.</p>"
+          + "<h2>Changes</h2><p>This policy may be updated from time to time; the current version is always published on this page.</p>"
+          + "<h2>Contact</h2><p>Questions or deletion requests: <a href='mailto:hi@redowansky.cyou'>hi@redowansky.cyou</a>.</p>"
+          + "</body></html>";
+        return new Response(html, { headers: { "content-type": "text/html;charset=utf-8", "cache-control": "public, max-age=3600" } });
+      }
       // Public: sitemap generated from the live catalog (home + one view page per title)
       if (path === "/sitemap.xml" && request.method === "GET") {
         const movies = await this.listMovies(env);
