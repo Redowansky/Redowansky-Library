@@ -1140,8 +1140,16 @@ const EXT_VIEW_PAGE = (m) => {
   const seoSchema = m.type === "song" ? null : { "@context": "https://schema.org", "@type": "Movie", name: m.title || "", description: seoDesc, url: seoCanon, ...(seoYear ? { datePublished: seoYear + "-01-01" } : {}), ...(m.genres && m.genres.length ? { genre: m.genres } : {}), ...(seoPoster ? { image: seoPoster } : {}) };
   const isDrive = (u) => u.indexOf("google.com") >= 0 && /[?&]id=([a-zA-Z0-9_-]+)/.test(u);
   const driveId = (u) => { const x = u.match(/[?&]id=([a-zA-Z0-9_-]+)/); return x ? x[1] : null; };
+  // Embed players (Lulustream): an /e/ URL is the provider's own player
+  // iframe, not a file — the site renders it as an iframe instead of
+  // <video>. The existing play gate already handles iframes (overlay
+  // covers the stage; only VIDEO gets play()/controls handling), and
+  // progress tracking safely no-ops (it returns early without a video).
+  const isEmbed = (u) => /luluvido\.com\/e\/|lulustream\.com\/e\//.test(u || "");
   const playerFor = (u) => isDrive(u)
     ? `<iframe src="https://drive.google.com/file/d/${driveId(u)}/preview" style="width:100%;height:70vh;border:none;background:#000" allow="autoplay; fullscreen" allowfullscreen></iframe>`
+    : isEmbed(u)
+    ? `<iframe src="${u}" scrolling="no" frameborder="0" style="width:100%;height:70vh;border:none;background:#000" allow="autoplay; fullscreen" allowfullscreen="true" webkitallowfullscreen="true" mozallowfullscreen="true"></iframe>`
     : `<video controls controlsList="nodownload" preload="metadata" playsinline src="${u}" style="width:100%;max-height:70vh;background:#000"></video>`;
   const switcher = sources.length > 1
     ? `<div style="display:flex;gap:8px;justify-content:center;margin-bottom:12px;flex-wrap:wrap">` +
@@ -1155,9 +1163,12 @@ const EXT_VIEW_PAGE = (m) => {
         if (db) db.href = "/gate/ext/${m.id}?src=" + i;
         const u = SRCS[i];
         const isD = u.indexOf("google.com") >= 0 && /[?&]id=/.test(u);
+        const isE = /luluvido\.com\/e\/|lulustream\.com\/e\//.test(u);
         if (isD) {
           const idm = u.match(/[?&]id=([a-zA-Z0-9_-]+)/);
           stage.innerHTML = '<iframe src="https://drive.google.com/file/d/' + idm[1] + '/preview" style="width:100%;height:70vh;border:none;background:#000" allow="autoplay; fullscreen" allowfullscreen></iframe>';
+        } else if (isE) {
+          stage.innerHTML = '<iframe src="' + u + '" scrolling="no" frameborder="0" style="width:100%;height:70vh;border:none;background:#000" allow="autoplay; fullscreen" allowfullscreen></iframe>';
         } else {
           stage.innerHTML = '<video controls controlsList="nodownload" preload="metadata" playsinline autoplay src="' + u + '" style="width:100%;max-height:70vh;background:#000"></video>';
         }
@@ -1206,7 +1217,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 ${switcher}
 <div class="stage">${player}</div>
 ${(m.overview || seoMetaLine) ? `<div style="width:100%;max-width:900px;margin-top:16px;color:#b8d8c0;font-size:.95rem;line-height:1.5">${m.overview ? `<p>${escHtml(m.overview)}</p>` : ""}${seoMetaLine ? `<div style="color:#7a9a85;font-size:.85rem;margin-top:8px">${escHtml(seoMetaLine)}</div>` : ""}</div>` : ""}
-<div style="margin-top:16px;text-align:center"><a id="dlbtn" href="/gate/ext/${m.id}" style="display:inline-block;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;text-decoration:none;font-weight:700;font-size:1rem;padding:13px 38px;border-radius:14px;box-shadow:0 8px 26px rgba(0,230,118,.35)">⭳ Download</a></div>
+${isEmbed(sources[0].url) ? "" : `<div style="margin-top:16px;text-align:center"><a id="dlbtn" href="/gate/ext/${m.id}" style="display:inline-block;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;text-decoration:none;font-weight:700;font-size:1rem;padding:13px 38px;border-radius:14px;box-shadow:0 8px 26px rgba(0,230,118,.35)">⭳ Download</a></div>`}
 <p class="note">🔗 streamed from external host</p>
 <div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
 <div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div>
@@ -1588,7 +1599,10 @@ export class TunnelDO {
     // External movies (linked, not hosted) - from KV (survives deploys)
     try {
       const extObj = await getExtMovies(env);
-      for (const id in extObj) movies.push({ ...extObj[id], external: true });
+      // unlisted entries stay reachable via their direct /view/ext/<id>
+      // URL (used to verify embed players) but are kept out of the home
+      // catalog and the app feed until explicitly published.
+      for (const id in extObj) { if (extObj[id].unlisted) continue; movies.push({ ...extObj[id], external: true }); }
     } catch (e) {}
     return movies;
   }
