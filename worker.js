@@ -8,6 +8,28 @@ const REGION = "us-east-1";
 const SERVICE = "s3";
 const te = new TextEncoder();
 
+// ---------- App minimum-version gate (v0.6.27, server-side forced updates) ----------
+// The app marks its requests with User-Agent "RedowanskyLibraryApp/...";
+// the website uses browser UAs, so the gate only ever touches app
+// traffic. App builds since 0.6.27 also send X-App-Version (their
+// versionCode); older builds send none and count as version 0.
+// Bump LATEST_APP_VERSION on every app release: any app build below
+// it gets 426 + the warning below instead of data, and the app shows
+// that message inside the player screen. The update path itself
+// (version.json on R2, /apk) is NOT gated, so a refused app can
+// still update.
+const LATEST_APP_VERSION = 39;
+const APP_UPDATE_MESSAGE = "⚠️ current version of the app is not working anymore please update to the latest version to keep watching ⚠️";
+function appVersionBlocked(request) {
+  const ua = request.headers.get("User-Agent") || "";
+  if (!ua.startsWith("RedowanskyLibraryApp")) return false;
+  const v = parseInt(request.headers.get("X-App-Version") || "", 10);
+  return !(v >= LATEST_APP_VERSION);
+}
+function appVersionRefused() {
+  return json({ blocked: true, message: APP_UPDATE_MESSAGE }, 426);
+}
+
 // ---------- AdBlock wall (home + view + ext-view) ----------
 // Strict wall: if an ad blocker is detected, a full-screen overlay blocks
 // the page until the visitor really disables it. The "I've disabled it"
@@ -1693,6 +1715,8 @@ export class TunnelDO {
       if (!s) return json({ signedIn: false });
       return json({ signedIn: true, name: s.name || "", email: s.email || "" });
     }
+    // v0.6.27 gate: one line covers GET/POST/DELETE below.
+    if (path === "/api/progress" && appVersionBlocked(request)) return appVersionRefused();
     if (path === "/api/progress" && request.method === "GET") {
       // Caller is either the site (session cookie) or the app (Bearer ID token) — same auth as POST.
       let sub = null, name = "";
@@ -1853,7 +1877,15 @@ export class TunnelDO {
         if (![200, 201, 204, 404].includes(r.status)) return new Response(bufToText(r.body), { status: r.status });
         return json({ ok: true });
       }
+      // Pre-play version check (app 0.6.27+): the server decides
+      // whether this build may still play. 200 = allowed, 426 =
+      // refused with the update warning message.
+      if (path === "/api/version-check" && request.method === "GET") {
+        if (appVersionBlocked(request)) return appVersionRefused();
+        return json({ ok: true, latest: LATEST_APP_VERSION });
+      }
       // Public: list all movies with metadata
+      if (path === "/api/movies" && request.method === "GET" && appVersionBlocked(request)) return appVersionRefused();
       if (path === "/api/movies" && request.method === "GET") {
         return json({ movies: await this.listMovies(env) });
       }
