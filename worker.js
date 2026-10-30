@@ -1945,6 +1945,18 @@ export class TunnelDO {
         await saveExtMovies(env, extObj);
         return json({ ok: true });
       }
+      // Admin: publish/unpublish an external entry (flip unlisted).
+      // Lets an embed entry into the home catalog + app feed (listed)
+      // or back to direct-URL-only (unlisted). Inert until called.
+      if (path === "/api/admin/extpublish" && request.method === "POST") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        const { id, unlisted } = await request.json();
+        const extObj = await getExtMovies(env);
+        if (!extObj[id]) return json({ error: "not found" }, 404);
+        extObj[id].unlisted = !!unlisted;
+        await saveExtMovies(env, extObj);
+        return json({ ok: true, id, unlisted: extObj[id].unlisted });
+      }
       // Admin: pull title + thumbnail from YouTube for an external entry
       if (path === "/api/admin/ytinfo" && request.method === "POST") {        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         const { id, url: yturl } = await request.json();
