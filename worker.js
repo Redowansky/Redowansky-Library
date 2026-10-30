@@ -283,7 +283,7 @@ section.row{padding:0 12px}
 }
 </style><script data-cfasync="false" src="https://aarems.org/1/8a50be483ddba782392f8d2b164694b9"></script></head><body>
 <header id="hdr"><div class="logo" onclick="location.href='/'">🎬 Redowansky</div>
-<nav><a class="on" data-f="movie">Movies</a><a data-f="song">Video Songs</a></nav>
+<nav><a class="on" data-f="movie">Movies</a></nav>
 <div class="search"><input id="q" placeholder="Search titles..." oninput="doSearch(this.value)"></div><div id="authbox"><a href="/auth/login" style="color:#00e676;text-decoration:none">Sign in with Google</a></div></header>
 <div class="hero" id="hero" style="display:none"><div id="hslides" style="position:absolute;inset:0"></div>
 <div class="hero-prog" id="hprog"></div></div>
