@@ -1208,6 +1208,11 @@ const EXT_VIEW_PAGE = async (m, env) => {
   // <video>. The existing play gate already handles iframes (overlay
   // covers the stage; only VIDEO gets play()/controls handling), and
   // progress tracking safely no-ops (it returns early without a video).
+  // NOTE 2026-10-31: sandboxing the embed iframe was tried and REVERTED
+  // the same evening — it blocked all in-video popup tabs, but
+  // Lulustream's player detects the sandbox and refuses to stream
+  // ("Streaming Blocked ... ensure the page is not sandboxed"). Do NOT
+  // re-add sandbox to embed iframes without a new workaround.
   const isEmbed = (u) => /luluvido\.com\/e\/|lulustream\.com\/e\//.test(u || "");
   const playerFor = async (u) => isDrive(u)
     ? `<iframe src="https://drive.google.com/file/d/${driveId(u)}/preview" style="width:100%;height:70vh;border:none;background:#000" allow="autoplay; fullscreen" allowfullscreen></iframe>`
