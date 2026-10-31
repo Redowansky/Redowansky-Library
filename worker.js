@@ -592,7 +592,6 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <div id="st-watching" style="font-size:.9rem;line-height:1.6"></div>
 </div>
 </div>
-</div></div>
 <!-- UPLOAD -->
 <!-- MOVIES (TMDB matching) -->
 <div class="sec" id="s-movies">
