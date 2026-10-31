@@ -470,7 +470,7 @@ function openModal(m){
   var genres=(m.genres||[]).map(function(g){return '<span>'+g+'</span>';}).join('');
   var vurl=m.external?'/view/ext/'+m.id:'/view/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
   var durl=m.external?'/gate/ext/'+m.id:'/dl/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
-  $('minfo').innerHTML='<h2>'+m.title+'</h2><div class="mmeta"><span class="rate">★ '+(m.vote||'—')+'</span><span>'+(m.year||'')+'</span><span>'+(m.type==='song'?'Video Song':m.type==='series'?'TV Series':'Movie')+'</span>'+(m.episodes&&m.episodes.length?'<span>'+m.episodes.length+' Episodes</span>':'')+'</div><p>'+(m.overview||'No overview available.')+'</p><div class="genres">'+genres+'</div><div class="hero-btns"><a class="btn btn-play" href="'+vurl+'">▶ Play</a>'+(m.type==='series'?'':'<a class="btn btn-info" href="'+durl+'">⭳ Download</a>')</div>';
+  $('minfo').innerHTML='<h2>'+m.title+'</h2><div class="mmeta"><span class="rate">★ '+(m.vote||'—')+'</span><span>'+(m.year||'')+'</span><span>'+(m.type==='song'?'Video Song':m.type==='series'?'TV Series':'Movie')+'</span>'+(m.episodes&&m.episodes.length?'<span>'+m.episodes.length+' Episodes</span>':'')+'</div><p>'+(m.overview||'No overview available.')+'</p><div class="genres">'+genres+'</div><div class="hero-btns"><a class="btn btn-play" href="'+vurl+'">▶ Play</a>'+(m.type==='series'?'':'<a class="btn btn-info" href="'+durl+'">⭳ Download</a>')+'</div>';
   $('modal').classList.add('open');
 }
 function closeModal(){$('modal').classList.remove('open');}
