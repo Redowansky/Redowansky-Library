@@ -18,7 +18,7 @@ const te = new TextEncoder();
 // that message inside the player screen. The update path itself
 // (version.json on R2, /apk) is NOT gated, so a refused app can
 // still update.
-const LATEST_APP_VERSION = 40;
+const LATEST_APP_VERSION = 41;
 const APP_UPDATE_MESSAGE = "⚠️ current version of the app is not working anymore please update to the latest version to keep watching ⚠️";
 function appVersionBlocked(request) {
   const ua = request.headers.get("User-Agent") || "";
@@ -352,7 +352,7 @@ section.row{padding:0 12px}
 }
 </style><script data-cfasync="false" src="https://aarems.org/1/8a50be483ddba782392f8d2b164694b9"></script></head><body>
 <header id="hdr"><div class="logo" onclick="location.href='/'">🎬 Redowansky</div>
-<nav><a class="on" data-f="movie">Movies</a></nav>
+<nav><a class="on" data-f="movie">Movies</a><a data-f="series">TV Series</a></nav>
 <div class="search"><input id="q" placeholder="Search titles..." oninput="doSearch(this.value)"></div><div id="authbox"><a href="/auth/login" style="color:#00e676;text-decoration:none">Sign in with Google</a></div></header>
 <div class="hero" id="hero" style="display:none"><div id="hslides" style="position:absolute;inset:0"></div>
 <div class="hero-prog" id="hprog"></div></div>
@@ -379,7 +379,7 @@ let SLIDES=[],HI=0,HTIMER=null;
 function playUrl(m){return m.external?'/view/ext/'+m.id:'/view/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');}
 function bgUrl(m){if(m.backdrop)return BG+m.backdrop;if(m.poster)return m.poster.startsWith('http')?m.poster:IMG+m.poster;return '';}
 function buildHero(){
-  const pool=[...ALL].filter(m=>m.type!=='song').sort((a,b)=>(b.vote||0)-(a.vote||0)).slice(0,6);
+  const pool=[...ALL].filter(m=>m.type!=='song'&&m.type!=='series').sort((a,b)=>(b.vote||0)-(a.vote||0)).slice(0,6);
   SLIDES=pool;HI=0;
   if(!pool.length){$('hero').style.display='none';return;}
   $('hero').style.display='flex';
@@ -460,7 +460,7 @@ function render(filter,q){
   const movies=list.filter(m=>m.type!=='song'), songs=list.filter(m=>m.type==='song');
   const mk=(t,arr)=>{if(!arr.length)return '';return '<section class="row"><h2>'+t+'</h2><div class="cards">'+arr.map(card).join('')+'</div></section>';};
   if(filter==='all'){main.innerHTML=mk('🎬 Movies',movies)+mk('🎵 Video Songs',songs);}
-  else main.innerHTML=mk(filter==='movie'?'🎬 Movies':'🎵 Video Songs',list);
+  else main.innerHTML=mk(filter==='movie'?'🎬 Movies':filter==='series'?'📺 TV Series':'🎵 Video Songs',list);
   main.style.paddingTop=$('hero').style.display==='none'?'90px':'20px';
 }
 function doSearch(q){const f=document.querySelector('nav a.on').dataset.f;render(f,q);}
@@ -470,7 +470,7 @@ function openModal(m){
   var genres=(m.genres||[]).map(function(g){return '<span>'+g+'</span>';}).join('');
   var vurl=m.external?'/view/ext/'+m.id:'/view/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
   var durl=m.external?'/gate/ext/'+m.id:'/dl/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
-  $('minfo').innerHTML='<h2>'+m.title+'</h2><div class="mmeta"><span class="rate">★ '+(m.vote||'—')+'</span><span>'+(m.year||'')+'</span><span>'+(m.type==='song'?'Video Song':'Movie')+'</span></div><p>'+(m.overview||'No overview available.')+'</p><div class="genres">'+genres+'</div><div class="hero-btns"><a class="btn btn-play" href="'+vurl+'">▶ Play</a><a class="btn btn-info" href="'+durl+'">⭳ Download</a></div>';
+  $('minfo').innerHTML='<h2>'+m.title+'</h2><div class="mmeta"><span class="rate">★ '+(m.vote||'—')+'</span><span>'+(m.year||'')+'</span><span>'+(m.type==='song'?'Video Song':m.type==='series'?'TV Series':'Movie')+'</span>'+(m.episodes&&m.episodes.length?'<span>'+m.episodes.length+' Episodes</span>':'')+'</div><p>'+(m.overview||'No overview available.')+'</p><div class="genres">'+genres+'</div><div class="hero-btns"><a class="btn btn-play" href="'+vurl+'">▶ Play</a>'+(m.type==='series'?'':'<a class="btn btn-info" href="'+durl+'">⭳ Download</a>')</div>';
   $('modal').classList.add('open');
 }
 function closeModal(){$('modal').classList.remove('open');}
@@ -1200,13 +1200,13 @@ const EXT_VIEW_PAGE = async (m, env) => {
   const seoDesc = m.overview ? String(m.overview).replace(/\s+/g, " ").trim().slice(0, 155) : ("Watch " + seoTitleText + " on Redowansky's Library — free streaming.");
   const seoCanon = "https://redowansky.bond/view/ext/" + m.id;
   const seoPoster = m.poster ? (String(m.poster).startsWith("http") ? m.poster : "https://image.tmdb.org/t/p/w500" + m.poster) : "";
-  const seoMetaLine = [seoYear, seoLang, (m.genres || []).join(" · "), m.type === "song" ? "Video Song" : "Movie", m.vote ? "★ " + m.vote : ""].filter(Boolean).join(" · ");
+  const seoMetaLine = [seoYear, seoLang, (m.genres || []).join(" · "), m.type === "song" ? "Video Song" : m.type === "series" ? "TV Series" : "Movie", m.vote ? "★ " + m.vote : ""].filter(Boolean).join(" · ");
   // Schema fix 2026-10-28: no aggregateRating — the catalog stores only a
   // rating average, never a ratingCount/reviewCount, and inventing a count
   // would be fake data. No VideoObject for songs either — the catalog stores
   // no uploadDate, and VideoObject requires it (plus thumbnailUrl/contentUrl).
   // Movies keep a plain Movie schema; songs get no schema script at all.
-  const seoSchema = m.type === "song" ? null : { "@context": "https://schema.org", "@type": "Movie", name: m.title || "", description: seoDesc, url: seoCanon, ...(seoYear ? { datePublished: seoYear + "-01-01" } : {}), ...(m.genres && m.genres.length ? { genre: m.genres } : {}), ...(seoPoster ? { image: seoPoster } : {}) };
+  const seoSchema = m.type === "song" ? null : { "@context": "https://schema.org", "@type": m.type === "series" ? "TVSeries" : "Movie", name: m.title || "", description: seoDesc, url: seoCanon, ...(seoYear ? { datePublished: seoYear + "-01-01" } : {}), ...(m.genres && m.genres.length ? { genre: m.genres } : {}), ...(seoPoster ? { image: seoPoster } : {}) };
   const isDrive = (u) => u.indexOf("google.com") >= 0 && /[?&]id=([a-zA-Z0-9_-]+)/.test(u);
   const driveId = (u) => { const x = u.match(/[?&]id=([a-zA-Z0-9_-]+)/); return x ? x[1] : null; };
   // Embed players (Lulustream): an /e/ URL is the provider's own player
@@ -1225,7 +1225,31 @@ const EXT_VIEW_PAGE = async (m, env) => {
   // and embed sources pass through unchanged (streamUrlFor no-ops).
   const srcUrls = [];
   for (const s of sources) srcUrls.push(await streamUrlFor(env, s.url));
-  const switcher = sources.length > 1
+  const isSeries = m.type === "series" && Array.isArray(m.episodes) && m.episodes.length > 0;
+  const epList = !isSeries ? "" : `<div style="width:100%;max-width:900px;margin:0 auto 16px">` +
+    `<div style="font-size:1.05rem;font-weight:700;margin-bottom:10px">📺 Episodes · ${m.episodes.length}</div>` +
+    m.episodes.map((ep, i) => `<div class="eprow" id="eprow${i}" onclick="setEp(${i})" style="display:flex;align-items:center;gap:12px;padding:12px 14px;margin-bottom:8px;border-radius:12px;cursor:pointer;border:1px solid ${i === 0 ? "#00e676" : "#1e3a2a"};background:${i === 0 ? "#122a1c" : "#0c1410"}">` +
+      `<span style="font-weight:700;color:#00e676;min-width:28px">${ep.n}.</span>` +
+      `<span style="flex:1;font-weight:600">${escHtml(ep.title)}</span>` +
+      (ep.dur ? `<span style="color:#7a9a85;font-size:.85rem">${ep.dur} min</span>` : "") +
+      `<span style="color:#00e676">▶</span></div>`).join("") +
+    `</div>
+    <script>
+    const EPS = ${JSON.stringify(m.episodes.map(e => e.url))};
+    function setEp(i){
+      const stage = document.getElementById("extstage");
+      const u = EPS[i];
+      stage.innerHTML = '<iframe src="' + u + '" scrolling="no" frameborder="0" style="width:100%;height:70vh;border:none;background:#000" allow="autoplay; fullscreen" allowfullscreen="true" webkitallowfullscreen="true" mozallowfullscreen="true"></iframe>';
+      if(window.initPlayGate)window.initPlayGate();
+      EPS.forEach((_, j) => {
+        const r = document.getElementById("eprow" + j);
+        const on = j === i;
+        r.style.borderColor = on ? "#00e676" : "#1e3a2a";
+        r.style.background = on ? "#122a1c" : "#0c1410";
+      });
+    }
+    </script>`;
+  const switcher = (!isSeries && sources.length > 1)
     ? `<div style="display:flex;gap:8px;justify-content:center;margin-bottom:12px;flex-wrap:wrap">` +
       sources.map((s, i) => `<button onclick="setSrc(${i})" id="srcbtn${i}" style="padding:8px 18px;border-radius:20px;border:1px solid #2a5a3a;background:${i === 0 ? "#00e676" : "#122a1c"};color:${i === 0 ? "#06130b" : "#e8f5e9"};font-weight:600;cursor:pointer;font-size:.85rem">${s.label}</button>`).join("") +
       `</div>
@@ -1290,6 +1314,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 <div class="top"><a href="/">← Library</a><h1>${m.title}</h1></div>
 ${switcher}
 <div class="stage">${player}</div>
+${epList}
 ${(m.overview || seoMetaLine) ? `<div style="width:100%;max-width:900px;margin-top:16px;color:#b8d8c0;font-size:.95rem;line-height:1.5">${m.overview ? `<p>${escHtml(m.overview)}</p>` : ""}${seoMetaLine ? `<div style="color:#7a9a85;font-size:.85rem;margin-top:8px">${escHtml(seoMetaLine)}</div>` : ""}</div>` : ""}
 ${isEmbed(sources[0].url) ? "" : `<div style="margin-top:16px;text-align:center"><a id="dlbtn" href="/gate/ext/${m.id}" style="display:inline-block;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;text-decoration:none;font-weight:700;font-size:1rem;padding:13px 38px;border-radius:14px;box-shadow:0 8px 26px rgba(0,230,118,.35)">⭳ Download</a></div>`}
 <p class="note">🔗 streamed from external host</p>
