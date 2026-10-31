@@ -1239,7 +1239,6 @@ const EXT_VIEW_PAGE = async (m, env) => {
       const stage = document.getElementById("extstage");
       const u = EPS[i];
       stage.innerHTML = '<iframe src="' + u + '" scrolling="no" frameborder="0" style="width:100%;height:70vh;border:none;background:#000" allow="autoplay; fullscreen" allowfullscreen="true" webkitallowfullscreen="true" mozallowfullscreen="true"></iframe>';
-      if(window.initPlayGate)window.initPlayGate();
       EPS.forEach((_, j) => {
         const r = document.getElementById("eprow" + j);
         const on = j === i;
@@ -1370,7 +1369,7 @@ ${isEmbed(sources[0].url) ? "" : `<div style="margin-top:16px;text-align:center"
     });
     if(media.tagName==='VIDEO')media.addEventListener('play',function(){gate.style.display='none';adBox.style.display='none';media.setAttribute('controls','');});
   };
-  window.initPlayGate();
+  if(!${isSeries})window.initPlayGate();
   var vid=document.querySelector('#extstage video');
   if(!vid)return;
   var start=parseInt(new URLSearchParams(location.search).get('start')||'0',10);
