@@ -476,6 +476,7 @@ function openModal(m){
 function closeModal(){$('modal').classList.remove('open');}
 $('modal').onclick=e=>{if(e.target.id==='modal')closeModal();};
 load();loadSync();
+(function(){try{var pid=null;try{pid=localStorage.getItem("presence-id");}catch(e){}if(!pid){pid=(crypto.randomUUID?crypto.randomUUID():("v-"+Date.now()+"-"+Math.random().toString(36).slice(2)));try{localStorage.setItem("presence-id",pid);}catch(e){}}function beat(){try{fetch("/api/presence",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:pid,kind:"browsing"})}).catch(function(){});}catch(e){}}beat();setInterval(beat,30000);}catch(e){}})();
 </script><footer style="text-align:center;padding:28px 12px 36px;color:#5f7a68;font-size:.85rem">👀 __VIEWS_TODAY__ viewers today</footer><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script>${ADBLOCK_WALL}</body></html>`;
 
 // ---- TMDB helpers ----
@@ -594,6 +595,11 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <div class="card"><div class="v" id="st-viewers">…</div><div class="l">👀 Visits today · GoatCounter</div></div>
 <div class="card"><div class="v" id="st-visits">…</div><div class="l">Visits today</div></div>
 <div class="card"><div class="v" id="st-total">…</div><div class="l">Total visits</div></div>
+</div>
+<div style="background:#0a120c;border:1px solid #1e3a2a;border-radius:12px;padding:14px;margin-bottom:16px">
+<h3 style="margin-bottom:8px">👥 Users Online Now: <span id="st-online">…</span></h3>
+<div id="st-online-split" style="color:#7a9a85;font-size:.85rem;margin-bottom:8px"></div>
+<div id="st-watching" style="font-size:.9rem;line-height:1.6"></div>
 </div>
 <div class="gaugebox">
 <div class="gauge"><svg width="150" height="150"><circle cx="75" cy="75" r="64" fill="none" stroke="#1e3a2a" stroke-width="12"/><circle id="gring" cx="75" cy="75" r="64" fill="none" stroke="#00e676" stroke-width="12" stroke-linecap="round" stroke-dasharray="402" stroke-dashoffset="402"/></svg>
@@ -989,7 +995,9 @@ if(d.views){$("st-viewers").textContent=d.views.viewersToday;$("st-visits").text
 try{const dk2=function(off){return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Dhaka",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(Date.now()+off*864e5));};const gj=await(await fetch("https://redowansky.goatcounter.com/counter/TOTAL.json?start="+dk2(0)+"&end="+dk2(1))).json();if(gj&&gj.count!=null)$("st-viewers").textContent=String(gj.count).replace(/,/g,"");}catch(e){}
 const pct=d.total?Math.min(100,d.used/d.total*100):0;
 $("gring").style.strokeDashoffset=402-(402*pct/100);$("gpct").textContent=pct.toFixed(1)+"%";
-$("gused").textContent=fmt(d.used);$("gfree").textContent=fmt(d.total-d.used);$("gtotal").textContent=fmt(d.total);}
+$("gused").textContent=fmt(d.used);$("gfree").textContent=fmt(d.total-d.used);$("gtotal").textContent=fmt(d.total);loadPresence();if(!window._presInt){window._presInt=setInterval(function(){if(document.getElementById("s-dash").classList.contains("on"))loadPresence();},20000);}}
+async function loadPresence(){try{const r=await api("/api/admin/presence?pw="+encodeURIComponent(pw()));if(!r.ok)return;const d=await r.json();$("st-online").textContent=d.online;$("st-online-split").textContent=d.browsing+" browsing · "+d.watching+" watching";$("st-watching").innerHTML=d.titles.length?d.titles.map(function(t){return "<div>▶ "+presEsc(t.title)+" · "+t.count+"</div>";}).join(""):"<div style='color:#7a9a85'>Nobody watching right now.</div>";}catch(e){}}
+function presEsc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 // upload
 async function loadUpBuckets(){const el=$("upBucket");if(!el)return;const d=await (await api("/api/buckets")).json();el.innerHTML=d.buckets.map(b=>"<option>"+b+"</option>").join("");}
 function ulog(m,cls){const d=document.createElement("div");if(cls)d.className=cls;d.textContent=m;const u=$("ulog");if(u)u.prepend(d);}
@@ -1189,6 +1197,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
   vid.addEventListener('pause',function(){send(true);});
   window.addEventListener('beforeunload',function(){send(true);});
 })();
+(function(){try{var pid=null;try{pid=localStorage.getItem("presence-id");}catch(e){}if(!pid){pid=(crypto.randomUUID?crypto.randomUUID():("v-"+Date.now()+"-"+Math.random().toString(36).slice(2)));try{localStorage.setItem("presence-id",pid);}catch(e){}}function beat(){try{fetch("/api/presence",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:pid,kind:"watching",title:${JSON.stringify(key.split("/").pop())}})}).catch(function(){});}catch(e){}}beat();setInterval(beat,30000);}catch(e){}})();
 </script><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script>${ADBLOCK_WALL}</body></html>`;
 const EXT_VIEW_PAGE = async (m, env) => {
   const sources = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
@@ -1391,6 +1400,7 @@ ${isEmbed(sources[0].url) ? "" : `<div style="margin-top:16px;text-align:center"
   vid.addEventListener('pause',function(){send(true);});
   window.addEventListener('beforeunload',function(){send(true);});
 })();
+(function(){try{var pid=null;try{pid=localStorage.getItem("presence-id");}catch(e){}if(!pid){pid=(crypto.randomUUID?crypto.randomUUID():("v-"+Date.now()+"-"+Math.random().toString(36).slice(2)));try{localStorage.setItem("presence-id",pid);}catch(e){}}function beat(){try{fetch("/api/presence",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:pid,kind:"watching",title:${JSON.stringify(m.title)}})}).catch(function(){});}catch(e){}}beat();setInterval(beat,30000);}catch(e){}})();
 </script><script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script>${ADBLOCK_WALL}</body></html>`;
 };
 function mediaKind(name){const e=name.split(".").pop().toLowerCase();
@@ -1508,6 +1518,30 @@ goBtn.onclick=function(){
 </body></html>`;
 function fmtSize(n){if(!n)return "—";const u=["B","KB","MB","GB"];let i=0;while(n>=1024&&i<3){n/=1024;i++;}return n.toFixed(1)+" "+u[i];}
 
+// Presence helpers (Users Online Now): a visitor counts as online
+// while a heartbeat arrived within the last 90s (3x the 30s beat,
+// tolerates two missed beats).
+const PRESENCE_TTL_MS = 90000;
+const PRESENCE_MAX = 5000;
+function prunePresence(map, now) {
+  for (const [id, v] of map) if (now - v.lastSeen > PRESENCE_TTL_MS) map.delete(id);
+  if (map.size > PRESENCE_MAX) {
+    const over = map.size - PRESENCE_MAX;
+    const ids = [...map.entries()].sort((a, b) => a[1].lastSeen - b[1].lastSeen).slice(0, over).map(e => e[0]);
+    for (const id of ids) map.delete(id);
+  }
+}
+function presenceSummary(map, now) {
+  prunePresence(map, now);
+  let browsing = 0, watching = 0;
+  const byTitle = new Map();
+  for (const v of map.values()) {
+    if (v.kind === "watching") { watching++; if (v.title) byTitle.set(v.title, (byTitle.get(v.title) || 0) + 1); }
+    else browsing++;
+  }
+  const titles = [...byTitle.entries()].map(([title, count]) => ({ title, count })).sort((a, b) => b.count - a.count).slice(0, 10);
+  return { online: map.size, browsing, watching, titles };
+}
 export class TunnelDO {
   constructor(state, env) {
     this.state = state;
@@ -1517,6 +1551,13 @@ export class TunnelDO {
     this.expectBodyFor = null;
     this._views = null;
     this._viewsTotal = null;
+    // Live presence (Users Online Now): in-memory ONLY, by design —
+    // a heartbeat every 30s per visitor must not burn storage writes.
+    // Wiped if the DO hibernates/evicts; heartbeats rebuild it
+    // within 30s. Map: id -> {kind, title, lastSeen}. No IPs stored:
+    // the client id is a random per-browser token, and only
+    // aggregates ever leave the server (see presenceSummary).
+    this._presence = new Map();
   }
 
   // --- WebSocket Hibernation API (migrated 2026-10-23, Redowan's call) ---
@@ -2304,6 +2345,24 @@ export class TunnelDO {
           }
         }
         return json({ tunnel: this.tunnelWs() ? "up" : "down", buckets: buckets.length, files, used, total: 53687091200, views: await this.viewsSnapshot() });
+      }
+      // Users Online Now: heartbeat ingestion (public) + admin read.
+      if (path === "/api/presence" && request.method === "POST") {
+        let body = {};
+        try { body = await request.json(); } catch (e) { return json({ error: "bad json" }, 400); }
+        const id = typeof body.id === "string" ? body.id.slice(0, 64) : "";
+        if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) return json({ error: "bad id" }, 400);
+        const kind = body.kind === "watching" ? "watching" : "browsing";
+        const title = kind === "watching" && typeof body.title === "string" ? body.title.slice(0, 200) : "";
+        if (!this._presence) this._presence = new Map();
+        prunePresence(this._presence, Date.now());
+        this._presence.set(id, { kind, title, lastSeen: Date.now() });
+        return json({ ok: true });
+      }
+      if (path === "/api/admin/presence" && request.method === "GET") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        if (!this._presence) this._presence = new Map();
+        return json(presenceSummary(this._presence, Date.now()));
       }
       if (path === "/api/admin/object" && request.method === "DELETE") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
