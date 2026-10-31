@@ -529,14 +529,6 @@ main{flex:1;padding:28px;max-width:860px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
 .card .v{font-size:1.6rem;font-weight:800;color:var(--grn)}
 .card .l{color:var(--mut);font-size:.8rem;margin-top:4px}
-.gaugebox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
-.gauge{position:relative;width:150px;height:150px;flex-shrink:0}
-.gauge svg{transform:rotate(-90deg)}
-.gauge .pct{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
-.gauge .pct b{font-size:1.5rem;color:var(--grn)}
-.gauge .pct span{font-size:.72rem;color:var(--mut)}
-.ginfo{font-size:.9rem;line-height:1.9}
-.ginfo b{color:var(--grn)}
 input,select{background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:11px 14px;font-size:.92rem;width:100%}
 label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 .btn{background:var(--grn2);border:none;color:#fff;border-radius:10px;padding:11px 22px;font-weight:700;cursor:pointer;font-size:.92rem}
@@ -590,8 +582,6 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <h1>📊 Dashboard</h1><p class="desc">System status and storage overview.</p>
 <div class="cards">
 <div class="card"><div class="v" id="st-tunnel">…</div><div class="l">Tunnel</div></div>
-<div class="card"><div class="v" id="st-buckets">…</div><div class="l">Shelves</div></div>
-<div class="card"><div class="v" id="st-files">…</div><div class="l">Files</div></div>
 <div class="card"><div class="v" id="st-viewers">…</div><div class="l">👀 Visits today · GoatCounter</div></div>
 <div class="card"><div class="v" id="st-visits">…</div><div class="l">Visits today</div></div>
 <div class="card"><div class="v" id="st-total">…</div><div class="l">Total visits</div></div>
@@ -601,10 +591,7 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <div id="st-online-split" style="color:#7a9a85;font-size:.85rem;margin-bottom:8px"></div>
 <div id="st-watching" style="font-size:.9rem;line-height:1.6"></div>
 </div>
-<div class="gaugebox">
-<div class="gauge"><svg width="150" height="150"><circle cx="75" cy="75" r="64" fill="none" stroke="#1e3a2a" stroke-width="12"/><circle id="gring" cx="75" cy="75" r="64" fill="none" stroke="#00e676" stroke-width="12" stroke-linecap="round" stroke-dasharray="402" stroke-dashoffset="402"/></svg>
-<div class="pct"><b id="gpct">…</b><span>used</span></div></div>
-<div class="ginfo"><div>Used: <b id="gused">…</b></div><div>Free: <b id="gfree">…</b></div><div>Total: <b id="gtotal">…</b></div></div>
+</div>
 </div></div>
 <!-- UPLOAD -->
 <!-- MOVIES (TMDB matching) -->
@@ -990,12 +977,10 @@ function pw(){return sessionStorage.getItem("apw")||"";}
 async function loadDash(){const r=await api("/api/admin/stats?pw="+encodeURIComponent(pw()));if(!r.ok)return;
 const d=await r.json();
 $("st-tunnel").textContent=d.tunnel==="up"?"● UP":"● DOWN";$("st-tunnel").style.color=d.tunnel==="up"?"var(--grn)":"var(--red)";
-$("st-buckets").textContent=d.buckets;$("st-files").textContent=d.files;
+
 if(d.views){$("st-viewers").textContent=d.views.viewersToday;$("st-visits").textContent=d.views.hitsToday;$("st-total").textContent=d.views.totalHits;}
 try{const dk2=function(off){return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Dhaka",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(Date.now()+off*864e5));};const gj=await(await fetch("https://redowansky.goatcounter.com/counter/TOTAL.json?start="+dk2(0)+"&end="+dk2(1))).json();if(gj&&gj.count!=null)$("st-viewers").textContent=String(gj.count).replace(/,/g,"");}catch(e){}
-const pct=d.total?Math.min(100,d.used/d.total*100):0;
-$("gring").style.strokeDashoffset=402-(402*pct/100);$("gpct").textContent=pct.toFixed(1)+"%";
-$("gused").textContent=fmt(d.used);$("gfree").textContent=fmt(d.total-d.used);$("gtotal").textContent=fmt(d.total);loadPresence();if(!window._presInt){window._presInt=setInterval(function(){if(document.getElementById("s-dash").classList.contains("on"))loadPresence();},20000);}}
+loadPresence();if(!window._presInt){window._presInt=setInterval(function(){if(document.getElementById("s-dash").classList.contains("on"))loadPresence();},20000);}}
 async function loadPresence(){try{const r=await api("/api/admin/presence?pw="+encodeURIComponent(pw()));if(!r.ok)return;const d=await r.json();$("st-online").textContent=d.online;$("st-online-split").textContent=d.browsing+" browsing · "+d.watching+" watching";$("st-watching").innerHTML=d.titles.length?d.titles.map(function(t){return "<div>▶ "+presEsc(t.title)+" · "+t.count+"</div>";}).join(""):"<div style='color:#7a9a85'>Nobody watching right now.</div>";}catch(e){}}
 function presEsc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 // upload
@@ -2331,20 +2316,7 @@ export class TunnelDO {
       }
       if (path === "/api/admin/stats" && request.method === "GET") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
-        const br = await this.s3fetch("GET", "/");
-        let buckets = [], files = 0, used = 0;
-        if (br.status < 400) {
-          buckets = parseBuckets(bufToText(br.body));
-          for (const b of buckets) {
-            const lr = await this.s3fetch("GET", "/" + b, { query: "list-type=2&max-keys=1000" });
-            if (lr.status < 400) {
-              const xml = bufToText(lr.body);
-              for (const m of xml.matchAll(/<Size>(\d+)<\/Size>/g)) used += parseInt(m[1]);
-              files += (xml.match(/<Key>/g) || []).length;
-            }
-          }
-        }
-        return json({ tunnel: this.tunnelWs() ? "up" : "down", buckets: buckets.length, files, used, total: 53687091200, views: await this.viewsSnapshot() });
+        return json({ tunnel: this.tunnelWs() ? "up" : "down", views: await this.viewsSnapshot() });
       }
       // Users Online Now: heartbeat ingestion (public) + admin read.
       if (path === "/api/presence" && request.method === "POST") {
