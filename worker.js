@@ -1723,41 +1723,6 @@ export class TunnelDO {
       return Response.redirect("https://pub-89e47025e7844f1eaf672a00cfdbba12.r2.dev/app/AdMobTest.apk", 302);
     }
 
-    // ---- Mihon extension repo (2026-10-31): Redowansky's own repo,
-    // so the genre-flat NHentai.xxx mod installs/updates from inside
-    // Mihon instead of a sideloaded APK (kills the "not associated
-    // with any store" banner). index.pb = gzipped protobuf (Mihon
-    // 0.20+), index.min.json = legacy JSON (older Mihon/forks).
-    // Regenerate with ~/workspace/mihon-repo/gen_repo.py on updates:
-    // bump EXT version/code + apk URL there, rerun this script, deploy.
-    const MIHON_MIN_JSON = '[{"name":"NHentai.xxx","pkg":"eu.kanade.tachiyomi.extension.all.nhentaixxx","apk":"https://pub-89e47025e7844f1eaf672a00cfdbba12.r2.dev/extensions/Tachiyomi__NHentai.xxx_v1.6.12_genre-flat.apk","lang":"all","code":106012,"version":"1.6.12","nsfw":1,"sources":[{"name":"NHentai.xxx","lang":"en","id":"1759845183972082995","baseUrl":"https://nhentai.xxx"},{"name":"NHentai.xxx","lang":"ja","id":"5939253174175011564","baseUrl":"https://nhentai.xxx"},{"name":"NHentai.xxx","lang":"zh","id":"560822675588930101","baseUrl":"https://nhentai.xxx"},{"name":"NHentai.xxx","lang":"all","id":"2384499981488817067","baseUrl":"https://nhentai.xxx"}]}]';
-    const MIHON_PB_B64 = 'H4sIAAAAAAACA6WRP0vDQBiH0UiVuMVB6SDYycFccmf+1UlEwUmhupe73KWJTS+lTWvrF1AUXF3qKIiO2i46CPUTuCkVHFwE6WcwaltqaSfn931+z+/eE8UUo8E+5sVsVZpIbaxvx1cJI9QyiWoSnToWcShkEFGm29DGSQdSk9rIUQ1KliFlmmkYOoKarWuUaKqqGziRFGfdMMwXVxSl0EsHJOBUmh8xUHKeG3DlKvYmiK+COL21yXiIPVCpVKQlVgJZzDFlIMS261WDnAdYJWS86AUcYN8H3P1Zj7bjzTHR70ryJSJbyaijinRmWprmQIYdw0RYVW2HEoIhAgUEKCsrvcCistu1pNN9PdJlCAwAUTrDeIHJjo9DgPNZaeeftk53OVLInh09KM8zCSFyLdbuYyj2K7WENXXq5vjlqX132piT+u8TH2c8MdMt0Un7HkTE58VDu/5x3kgNEHt4FFG/fW4eXdbeJweIA3c4AaeuDx9bZ83WycJfQoj+ZSjyBWZYI8hzAgAA';
-    if (path === "/mihon/index.min.json" && request.method === "GET") {
-      return new Response(MIHON_MIN_JSON, { headers: { "content-type": "application/json;charset=utf-8", "cache-control": "no-store" } });
-    }
-    if (path === "/mihon/index.json" && request.method === "GET") {
-      return new Response(MIHON_MIN_JSON, { headers: { "content-type": "application/json;charset=utf-8", "cache-control": "no-store" } });
-    }
-    if (path === "/mihon/index.pb" && request.method === "GET") {
-      const bin = Uint8Array.from(atob(MIHON_PB_B64), c => c.charCodeAt(0));
-      return new Response(bin, { headers: { "content-type": "application/octet-stream", "cache-control": "no-store" } });
-    }
-    if ((path === "/mihon" || path === "/mihon/") && request.method === "GET") {
-      const html = "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-        + "<title>Redowansky's Mihon extension repo</title>"
-        + "<style>body{background:#0b0b0b;color:#eee;font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 20px;line-height:1.6}a{color:#7ec8ff}code{background:#222;padding:2px 6px;border-radius:4px;word-break:break-all}.btn{display:inline-block;background:#2e7d32;color:#fff!important;padding:12px 22px;border-radius:8px;text-decoration:none;margin:6px 8px 6px 0}.btn2{background:#37474f}</style></head><body>"
-        + "<h1>Redowansky's Mihon extension repo</h1>"
-        + "<p>Add this repo to Mihon (or a fork like TachiyomiSY / Komikku) and the extensions below install and update from inside the app — no sideloaded APKs.</p>"
-        + "<p><a class='btn' href='tachiyomi://add-repo?url=https%3A%2F%2Fredowansky.bond%2Fmihon%2Findex.pb'>Add to Mihon (newer)</a>"
-        + "<a class='btn btn2' href='tachiyomi://add-repo?url=https%3A%2F%2Fredowansky.bond%2Fmihon%2Findex.min.json'>Add to Mihon (older / forks)</a></p>"
-        + "<p>Manual: in Mihon go to <b>More &rarr; Settings &rarr; Browse &rarr; Extension repos &rarr; Add</b> and paste one of these:</p>"
-        + "<p><code>https://redowansky.bond/mihon/index.pb</code> (Mihon 0.20+)<br><code>https://redowansky.bond/mihon/index.min.json</code> (older Mihon / forks)</p>"
-        + "<p>Then open <b>Browse &rarr; Extensions</b> and install or update from the list.</p>"
-        + "<h2>Extensions</h2><ul><li><b>NHentai.xxx 1.6.12</b> — genre-flat mod (flat Genres checkbox list, Manhwatop-style)</li></ul>"
-        + "</body></html>";
-      return new Response(html, { headers: { "content-type": "text/html;charset=utf-8", "cache-control": "no-store" } });
-    }
-
     // ---- Google sync: auth + progress (before the S3 gate below) ----
     if (path === "/auth/login" && request.method === "GET") {
       if (!env.GOOGLE_CLIENT_SECRET) return new Response("Google sign-in is not configured yet (client secret missing)", { status: 503 });
