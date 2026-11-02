@@ -469,7 +469,7 @@ function openModal(m){
   $('mhero').style.backgroundImage=m.backdrop?'url('+BG+m.backdrop+')':(m.poster&&m.poster.startsWith('http')?'url('+m.poster+')':'none');
   var genres=(m.genres||[]).map(function(g){return '<span>'+g+'</span>';}).join('');
   var vurl=m.external?'/view/ext/'+m.id:'/view/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
-  var durl=m.external?'/gate/ext/'+m.id:'/dl/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
+  var durl=m.external?'/download/ext/'+m.id:'/dl/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
   $('minfo').innerHTML='<h2>'+m.title+'</h2><div class="mmeta"><span class="rate">★ '+(m.vote||'—')+'</span><span>'+(m.year||'')+'</span><span>'+(m.type==='song'?'Video Song':m.type==='series'?'TV Series':'Movie')+'</span>'+(m.episodes&&m.episodes.length?'<span>'+m.episodes.length+' Episodes</span>':'')+'</div><p>'+(m.overview||'No overview available.')+'</p><div class="genres">'+genres+'</div><div class="hero-btns"><a class="btn btn-play" href="'+vurl+'">▶ Play</a>'+(m.type==='series'?'':'<a class="btn btn-info" href="'+durl+'">⭳ Download</a>')+'</div>';
   $('modal').classList.add('open');
 }
@@ -1255,7 +1255,7 @@ const EXT_VIEW_PAGE = async (m, env) => {
       function setSrc(i){
         const stage = document.getElementById("extstage");
         const db = document.getElementById("dlbtn");
-        if (db) db.href = "/gate/ext/${m.id}?src=" + i;
+        if (db) db.href = "/download/ext/${m.id}?src=" + i;
         const u = SRCS[i];
         const isD = u.indexOf("google.com") >= 0 && /[?&]id=/.test(u);
         const isE = /luluvido\.com\/e\/|lulustream\.com\/e\//.test(u);
@@ -1313,7 +1313,7 @@ ${switcher}
 <div class="stage">${player}</div>
 ${epList}
 ${(m.overview || seoMetaLine) ? `<div style="width:100%;max-width:900px;margin-top:16px;color:#b8d8c0;font-size:.95rem;line-height:1.5">${m.overview ? `<p>${escHtml(m.overview)}</p>` : ""}${seoMetaLine ? `<div style="color:#7a9a85;font-size:.85rem;margin-top:8px">${escHtml(seoMetaLine)}</div>` : ""}</div>` : ""}
-${isEmbed(sources[0].url) ? "" : `<div style="margin-top:16px;text-align:center"><a id="dlbtn" href="/gate/ext/${m.id}" style="display:inline-block;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;text-decoration:none;font-weight:700;font-size:1rem;padding:13px 38px;border-radius:14px;box-shadow:0 8px 26px rgba(0,230,118,.35)">⭳ Download</a></div>`}
+${isEmbed(sources[0].url) ? "" : `<div style="margin-top:16px;text-align:center"><a id="dlbtn" href="/download/ext/${m.id}" style="display:inline-block;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;text-decoration:none;font-weight:700;font-size:1rem;padding:13px 38px;border-radius:14px;box-shadow:0 8px 26px rgba(0,230,118,.35)">⭳ Download</a></div>`}
 <p class="note">🔗 streamed from external host</p>
 <div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
 <div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div>
@@ -1431,26 +1431,137 @@ async function hmacHex(key, msg) {
   const s = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(msg));
   return [...new Uint8Array(s)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-const GATE_PAGE = (title, sub, desc, labels, src0) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+const DOWNLOAD_PAGE = (m, srcInfos, viewUrl, src0) => {
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const poster = m.poster ? (String(m.poster).startsWith("http") ? m.poster : "https://image.tmdb.org/t/p/w500" + m.poster) : "";
+  const metaLine = [m.year, m.type === "series" ? "TV Series" : m.type === "song" ? "Video Song" : "Movie", (m.genres || []).join(" · "), m.vote ? "★ " + m.vote : ""].filter(Boolean).join(" · ");
+  const infos = (srcInfos && srcInfos.length) ? srcInfos : [{ label: "Download", fmt: null, size: null, date: null }];
+  const hot = src0 || 0;
+  const blocks = infos.map((s, i) => {
+    const meta = [s.fmt, s.size, s.date].filter(Boolean).join(" · ");
+    return '<div class="srcblock' + (i === hot ? ' hot' : '') + '">'
+      + '<div class="srclabel">' + esc(s.label) + '</div>'
+      + (meta ? '<div class="srcmeta">' + esc(meta) + '</div>' : '')
+      + '<button class="dlbtn" data-src="' + i + '" disabled>⭳ Download — ' + esc(s.label) + '</button>'
+      + '</div>';
+  }).join("");
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Download ${esc(m.title)} — Redowansky's Library</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-serif}
+.wrap{max-width:900px;margin:0 auto;padding:24px}
+.head{display:flex;gap:20px;margin-bottom:24px;flex-wrap:wrap}
+.head img{width:180px;border-radius:14px;border:1px solid #1e3a2a;align-self:flex-start}
+.head h1{font-size:1.5rem;margin-bottom:8px;word-break:break-word}
+.meta{color:#7a9a85;font-size:.9rem;margin-bottom:10px}
+.ov{color:#c8ddd0;font-size:.95rem;line-height:1.6}
+.note{color:#7a9a85;font-size:.9rem;margin-bottom:16px;line-height:1.5}
+.srcblock{border:1px solid #1e3a2a;border-radius:14px;padding:16px;margin-bottom:14px;background:#0c1410}
+.srcblock.hot{border-color:#00e676}
+.srclabel{font-weight:700;margin-bottom:4px}
+.srcmeta{color:#7a9a85;font-size:.85rem;margin-bottom:12px}
+.dlbtn{display:block;width:100%;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;border:none;font-weight:700;font-size:1.02rem;padding:14px 20px;border-radius:12px;box-shadow:0 8px 26px rgba(0,230,118,.35);cursor:pointer}
+.dlbtn[disabled]{background:#1c2b21;color:#5f7a68;box-shadow:none;cursor:not-allowed}
+.status{color:#7a9a85;font-size:.9rem;min-height:1.2em;margin:16px 0;text-align:center}
+.tswrap{display:flex;justify-content:center;margin-bottom:18px;min-height:65px}
+.stream{display:block;text-align:center;margin-top:14px;background:#122a1c;border:1px solid #2a5a3a;color:#e8f5e9;text-decoration:none;font-weight:700;font-size:1rem;padding:14px 20px;border-radius:12px}
+.back{display:inline-block;margin-top:18px;color:#00e676;text-decoration:none;font-size:.9rem}
+.wall{display:none;background:#2a1215;border:1px solid #6e2a30;color:#ffb3ba;border-radius:12px;padding:18px;font-size:.92rem;line-height:1.5;margin-bottom:20px}
+</style></head><body>
+<div class="wrap">
+<div class="head">
+${poster ? `<img src="${poster}" alt="">` : ""}
+<div style="flex:1;min-width:240px">
+<h1>${esc(m.title)}</h1>
+<div class="meta">${esc(metaLine)}</div>
+${m.overview ? `<div class="ov">${esc(m.overview)}</div>` : ""}
+</div>
+</div>
+<div id="dlMain">
+<div class="note">Downloads are free because ads pay for the library — each download takes 3 clicks: 2 ads, then your file.</div>
+${blocks}
+<div class="status" id="status">Complete the human check below to unlock the downloads.</div>
+<div class="tswrap"><div class="cf-turnstile" data-sitekey="${TS_SITEKEY}" data-callback="tsOk"></div></div>
+<a class="stream" href="${viewUrl}">▶ Stream Online</a>
+<a class="back" href="/">← back to library</a>
+</div>
+<div class="wall" id="wall">🚫 <b>Adblock detected.</b><br>Downloads are free because ads pay for the library.<br>Please disable your adblocker for this site and refresh the page.</div>
+</div>
+<div id="bait" class="ad adsbox ad-banner pub_300x250" style="height:1px;font-size:1px;line-height:1px">&nbsp;</div>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<script>
+var DESC=${JSON.stringify({ kind: "ext", id: m.id })};
+var tsToken=null,blocked=false,busy=false,clicks=0;
+var st=document.getElementById("status");
+var btns=document.querySelectorAll(".dlbtn");
+function tsOk(t){tsToken=t;if(blocked)return;btns.forEach(function(b){b.disabled=false;});st.textContent="Ready — each download takes 3 clicks: 2 ads, then your file.";}
+setTimeout(function(){
+  var bait=document.getElementById("bait");
+  var hidden=!bait||bait.offsetHeight===0||bait.offsetParent===null;
+  if(!hidden){var cs=getComputedStyle(bait);if(cs.display==="none"||cs.visibility==="hidden")hidden=true;}
+  if(hidden){blocked=true;document.getElementById("dlMain").style.display="none";document.getElementById("wall").style.display="block";}
+},1500);
+btns.forEach(function(b){b.onclick=function(){
+  if(busy||b.disabled)return;
+  clicks++;
+  if(clicks<=2){
+    st.textContent="Ad "+clicks+" of 2 — click any Download button again to continue.";
+    return;
+  }
+  busy=true;var old=b.textContent;b.textContent="Checking…";
+  fetch("/api/gate/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({desc:DESC,src:parseInt(b.getAttribute("data-src"),10)||0,token:tsToken})})
+  .then(function(r){return r.json();})
+  .then(function(j){
+    if(j&&j.go){location.href=j.go;return;}
+    busy=false;clicks=0;tsToken=null;b.textContent=old;
+    btns.forEach(function(x){x.disabled=true;});
+    st.textContent="❌ "+((j&&j.error)||"verification failed — refresh and try again.")+" Complete the human check again.";
+    if(window.turnstile)turnstile.reset();
+  })
+  .catch(function(){busy=false;b.textContent=old;st.textContent="❌ Network error — refresh and try again.";});
+};});
+</script>
+<div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
+<script data-cfasync="false" src="https://bancadeltempoidea.org/14/ba7702e94bb4deeb1322aa2d0369e347"></script><script data-cfasync="false" src="https://aarems.org/1/8a50be483ddba782392f8d2b164694b9"></script></body></html>`;
+};
+
+const GATE_PAGE = (title, sub, desc, srcInfos, viewUrl, src0) => {
+  var infos = (srcInfos && srcInfos.length) ? srcInfos : [{ label: "Download", fmt: null, size: null, date: null }];
+  var hot = src0 || 0;
+  function esc(s){ return String(s == null ? "" : s); }
+  var blocks = infos.map(function(s, i){
+    var meta = [esc(s.fmt), esc(s.size), esc(s.date)].filter(function(x){ return x; }).join(" · ");
+    return '<div class="srcblock' + (i === hot ? ' hot' : '') + '">'
+      + '<div class="srclabel">' + esc(s.label) + '</div>'
+      + (meta ? '<div class="srcmeta">' + meta + '</div>' : '')
+      + '<button class="dlbtn" data-src="' + i + '" disabled>⭳ Download — ' + esc(s.label) + '</button>'
+      + '</div>';
+  }).join("");
+  var streamBtn = viewUrl ? '<a class="stream" href="' + viewUrl + '">▶ Stream Online</a>' : '';
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <script async src="https://ss.mrmnd.com/banner.js"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Download ${title} — Redowansky's Library</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
-.card{background:linear-gradient(180deg,#101b14,#0c1410);border:1px solid #1e3a2a;border-radius:20px;padding:36px 32px;max-width:480px;width:100%}
+.card{background:linear-gradient(180deg,#101b14,#0c1410);border:1px solid #1e3a2a;border-radius:20px;padding:36px 32px;max-width:520px;width:100%}
 .ico{font-size:3rem;margin-bottom:12px}
 h1{font-size:1.25rem;margin-bottom:6px;word-break:break-word}
 .meta{color:#7a9a85;font-size:.85rem;margin-bottom:20px}
 .adslot{background:#0a120c;border:1px dashed #1e3a2a;border-radius:12px;min-height:120px;display:flex;align-items:center;justify-content:center;color:#55556a;font-size:.8rem;margin-bottom:20px;padding:16px;overflow:hidden}
-.srcs{display:flex;gap:8px;justify-content:center;margin-bottom:18px;flex-wrap:wrap}
-.srcs button{padding:8px 18px;border-radius:20px;border:1px solid #2a5a3a;background:#122a1c;color:#e8f5e9;font-weight:600;cursor:pointer;font-size:.85rem}
-.srcs button.on{background:#00e676;color:#06130b}
-.cd{font-size:2rem;font-weight:800;color:#69f0ae;margin-bottom:6px}
+.srcblock{border:1px solid #1e3a2a;border-radius:14px;padding:16px;margin-bottom:14px;background:#0a120c}
+.srcblock.hot{border-color:#00e676}
+.srclabel{font-weight:700;margin-bottom:4px}
+.srcmeta{color:#7a9a85;font-size:.85rem;margin-bottom:12px}
+.note{color:#7a9a85;font-size:.85rem;margin-bottom:16px;line-height:1.5}
 .status{color:#7a9a85;font-size:.88rem;min-height:1.2em;margin-bottom:16px}
 .tswrap{display:flex;justify-content:center;margin-bottom:18px;min-height:65px}
-.btn{display:inline-block;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;border:none;text-decoration:none;font-weight:700;font-size:1.05rem;padding:15px 44px;border-radius:14px;box-shadow:0 8px 26px rgba(0,230,118,.35);cursor:pointer}
-.btn[disabled]{background:#1c2b21;color:#5f7a68;box-shadow:none;cursor:not-allowed}
+.dlbtn{display:block;width:100%;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;border:none;text-decoration:none;font-weight:700;font-size:1.02rem;padding:14px 20px;border-radius:12px;box-shadow:0 8px 26px rgba(0,230,118,.35);cursor:pointer}
+.dlbtn[disabled]{background:#1c2b21;color:#5f7a68;box-shadow:none;cursor:not-allowed}
+.stream{display:block;margin-top:14px;background:#122a1c;border:1px solid #2a5a3a;color:#e8f5e9;text-decoration:none;font-weight:700;font-size:1rem;padding:14px 20px;border-radius:12px}
 .wall{display:none;background:#2a1215;border:1px solid #6e2a30;color:#ffb3ba;border-radius:12px;padding:18px;font-size:.92rem;line-height:1.5}
 .back{display:inline-block;margin-top:18px;color:#00e676;text-decoration:none;font-size:.9rem}
 </style></head><body>
@@ -1460,11 +1571,11 @@ h1{font-size:1.25rem;margin-bottom:6px;word-break:break-word}
 <div class="meta">${sub}</div>
 <div class="adslot" id="adslot"><div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div></div>
 <div id="gateMain">
-<div class="srcs" id="srcs"></div>
-<div class="cd" id="cd">10</div>
-<div class="status" id="status">Preparing your download…</div>
+<div class="note">Downloads are free because ads pay for the library — each download takes 3 clicks: 2 ads, then your file.</div>
+${blocks}
+<div class="status" id="status">Complete the human check below to unlock the downloads.</div>
 <div class="tswrap"><div class="cf-turnstile" data-sitekey="${TS_SITEKEY}" data-callback="tsOk"></div></div>
-<button class="btn" id="go" disabled>⭳ Download</button><br>
+${streamBtn}
 <a class="back" href="/">← back to library</a>
 </div>
 <div class="wall" id="wall">🚫 <b>Adblock detected.</b><br>Downloads are free because ads pay for the library.<br>Please disable your adblocker for this site and refresh the page.</div>
@@ -1473,38 +1584,45 @@ h1{font-size:1.25rem;margin-bottom:6px;word-break:break-word}
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <script>
 var DESC=${JSON.stringify(desc)};
-var LABELS=${JSON.stringify(labels)};
-var curSrc=${src0 || 0},left=10,cdDone=false,tsToken=null,blocked=false,busy=false;
-var goBtn=document.getElementById("go"),st=document.getElementById("status"),cdEl=document.getElementById("cd");
-var srcsEl=document.getElementById("srcs");
-if(LABELS.length>1){LABELS.forEach(function(l,i){var b=document.createElement("button");b.textContent=l;if(i===curSrc)b.className="on";b.onclick=function(){curSrc=i;var bs=srcsEl.querySelectorAll("button");for(var j=0;j<bs.length;j++)bs[j].className=(j===i?"on":"");};srcsEl.appendChild(b);});}
-function tsOk(t){tsToken=t;tryEnable();}
-function tryEnable(){
-  if(blocked)return;
-  if(cdDone&&tsToken){goBtn.disabled=false;st.textContent="Ready — your link expires 5 minutes after you click.";}
-  else if(cdDone){st.textContent="Complete the human check above to unlock the download.";}
-}
+var tsToken=null,blocked=false,busy=false,clicks=0;
+var st=document.getElementById("status");
+var btns=document.querySelectorAll(".dlbtn");
+function tsOk(t){tsToken=t;if(blocked)return;btns.forEach(function(b){b.disabled=false;});st.textContent="Ready — each download takes 3 clicks: 2 ads, then your file.";}
 setTimeout(function(){
   var bait=document.getElementById("bait");
   var hidden=!bait||bait.offsetHeight===0||bait.offsetParent===null;
   if(!hidden){var cs=getComputedStyle(bait);if(cs.display==="none"||cs.visibility==="hidden")hidden=true;}
   if(hidden){blocked=true;document.getElementById("gateMain").style.display="none";document.getElementById("wall").style.display="block";}
 },1500);
-var timer=setInterval(function(){
-  left--;if(left<=0){left=0;clearInterval(timer);cdDone=true;cdEl.textContent="✓";tryEnable();}
-  else cdEl.textContent=left;
-},1000);
-goBtn.onclick=function(){
-  if(busy||goBtn.disabled)return;busy=true;goBtn.textContent="Checking…";
-  fetch("/api/gate/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({desc:DESC,src:curSrc,token:tsToken})})
+function showAd(){
+  var s=document.createElement("script");
+  s.async=true;s.src="https://ss.mrmnd.com/interstitial.js";
+  s.setAttribute("data-mndintid","206f947f-813c-4f71-aedc-ffd005412447");
+  document.head.appendChild(s);
+}
+btns.forEach(function(b){b.onclick=function(){
+  if(busy||b.disabled)return;
+  clicks++;
+  if(clicks<=2){showAd();st.textContent="Ad "+clicks+" of 2 shown — click any Download button again to continue.";return;}
+  busy=true;var old=b.textContent;b.textContent="Checking…";
+  fetch("/api/gate/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({desc:DESC,src:parseInt(b.getAttribute("data-src"),10)||0,token:tsToken})})
   .then(function(r){return r.json();})
-  .then(function(j){if(j&&j.go){location.href=j.go;}else{busy=false;goBtn.textContent="⭳ Download";st.textContent="❌ "+((j&&j.error)||"verification failed — refresh and try again.");}})
-  .catch(function(){busy=false;goBtn.textContent="⭳ Download";st.textContent="❌ Network error — refresh and try again.";});
-};
+  .then(function(j){
+    if(j&&j.go){location.href=j.go;return;}
+    busy=false;clicks=0;tsToken=null;b.textContent=old;
+    btns.forEach(function(x){x.disabled=true;});
+    st.textContent="❌ "+((j&&j.error)||"verification failed — refresh and try again.")+" Complete the human check again.";
+    if(window.turnstile)turnstile.reset();
+  })
+  .catch(function(){busy=false;b.textContent=old;st.textContent="❌ Network error — refresh and try again.";});
+};});
 </script>
 <div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
 </body></html>`;
+};
 function fmtSize(n){if(!n)return "—";const u=["B","KB","MB","GB"];let i=0;while(n>=1024&&i<3){n/=1024;i++;}return n.toFixed(1)+" "+u[i];}
+
+function fmtDate(d){try{const x=new Date(d);if(isNaN(x.getTime()))return null;return x.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});}catch(e){return null;}}
 
 // Presence helpers (Users Online Now): a visitor counts as online
 // while a heartbeat arrived within the last 90s (3x the 30s beat,
@@ -2413,23 +2531,56 @@ export class TunnelDO {
         const key = keyParts.map(decodeURIComponent).join("/");
         return this.pageResp(VIEW_PAGE(bucket, key, mediaKind(key)), request);
       }
-      if (path.startsWith("/gate/ext/") && request.method === "GET") {
+      if (path.startsWith("/download/ext/") && request.method === "GET") {
         const id = decodeURIComponent(path.split("/")[3] || "");
         const extObj = await getExtMovies(env);
         const m = extObj[id];
         if (!m) return new Response("not found", { status: 404 });
         const srcs = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
-        const labels = srcs.map((s) => s.label || "Download");
+        const srcInfos = [];
+        for (const s of srcs) {
+          let fmt = null, size = null, date = null;
+          try {
+            const u = s.url || "";
+            const em = u.split("?")[0].match(/\.([A-Za-z0-9]{2,5})$/);
+            if (em) fmt = em[1].toUpperCase();
+            const isEmb = /luluvido\.com\/e\/|lulustream\.com\/e\//.test(u);
+            if (!isEmb) {
+              const dk2 = r2KeyOf(u);
+              if (dk2) {
+                const h = await env.MEDIA.head(dk2);
+                if (h) { if (h.size) size = fmtSize(h.size); if (h.uploaded) date = fmtDate(h.uploaded); }
+              } else if (/^https?:\/\//i.test(u)) {
+                try {
+                  const ctl = new AbortController();
+                  const to = setTimeout(() => ctl.abort(), 5000);
+                  const hr = await fetch(u, { method: "HEAD", signal: ctl.signal, redirect: "follow" });
+                  clearTimeout(to);
+                  const cl = hr.headers.get("content-length");
+                  if (cl) size = fmtSize(parseInt(cl, 10));
+                  const lm = hr.headers.get("last-modified");
+                  if (lm) date = fmtDate(lm);
+                } catch (e) {}
+              }
+            }
+          } catch (e) {}
+          srcInfos.push({ label: s.label || "Download", fmt, size, date });
+        }
         let src0 = parseInt(url.searchParams.get("src") || "0", 10);
         if (!(src0 >= 0 && src0 < srcs.length)) src0 = 0;
-        const sub = [m.year, m.type === "song" ? "Video Song" : "Movie"].filter(Boolean).join(" · ");
-        return this.pageResp(GATE_PAGE(m.title || "Download", sub, { kind: "ext", id }, labels, src0), request);
+        return this.pageResp(DOWNLOAD_PAGE(m, srcInfos, "/view/ext/" + id, src0), request);
+      }
+      if (path.startsWith("/gate/ext/") && request.method === "GET") {
+        const id = decodeURIComponent(path.split("/")[3] || "");
+        const q = url.searchParams.get("src");
+        return Response.redirect(url.origin + "/download/ext/" + encodeURIComponent(id) + (q ? "?src=" + encodeURIComponent(q) : ""), 302);
       }
       if (path.startsWith("/gate/file/") && request.method === "GET") {
         const [, , , bucket, ...keyParts] = path.split("/");
         const key = keyParts.map(decodeURIComponent).join("/");
         if (!bucket || !key) return new Response("not found", { status: 404 });
-        return this.pageResp(GATE_PAGE(key.split("/").pop(), "from the " + bucket + " shelf", { kind: "file", bucket, key }, ["Download"], 0), request);
+        const fExt = key.split("?")[0].match(/\.([A-Za-z0-9]{2,5})$/);
+        return this.pageResp(GATE_PAGE(key.split("/").pop(), "from the " + bucket + " shelf", { kind: "file", bucket, key }, [{ label: "Download", fmt: fExt ? fExt[1].toUpperCase() : null, size: null, date: null }], null, 0), request);
       }
       if (path === "/api/gate/verify" && request.method === "POST") {
         let body;
