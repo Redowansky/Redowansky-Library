@@ -2484,18 +2484,71 @@ export class TunnelDO {
           const s = srcs[t.src || 0] || srcs[0];
           // v0.6.28: R2 sources download through the signed stream
           // (the public R2 URL is dead once the bucket's r2.dev
-          // domain is off); other hosts redirect as before.
+          // domain is off). Other hosts go through the signed /px/
+          // proxy below, which re-serves them as a download so
+          // Chrome saves instead of opening its player.
           const dk = r2KeyOf(s.url);
           if (dk) {
             const tok = await mintStreamToken(env, dk);
-            return Response.redirect("/stream/" + dk.split("/").map(encodeURIComponent).join("/") + "?t=" + tok + "&download=1", 302);
+            return Response.redirect(url.origin + "/stream/" + dk.split("/").map(encodeURIComponent).join("/") + "?t=" + tok + "&download=1", 302);
           }
-          return Response.redirect(s.url, 302);
+          return Response.redirect(url.origin + "/px/" + payload + "." + sig, 302);
         }
         if (t.kind === "file") {
-          return Response.redirect("/d/" + encodeURIComponent(t.bucket) + "/" + t.key.split("/").map(encodeURIComponent).join("/"), 302);
+          return Response.redirect(url.origin + "/d/" + encodeURIComponent(t.bucket) + "/" + t.key.split("/").map(encodeURIComponent).join("/"), 302);
         }
         return new Response("bad link", { status: 400 });
+      }
+      // Signed download proxy (2026-11-03): re-serves a catalog
+      // source as a real download. The URL comes from our own
+      // catalog entry, never from the request, so this cannot be
+      // used as an open proxy. Same signed payload as /go/.
+      if (path.startsWith("/px/") && (request.method === "GET" || request.method === "HEAD")) {
+        const seg = path.slice(4);
+        const dot = seg.lastIndexOf(".");
+        if (dot < 1) return new Response("bad link", { status: 400 });
+        const payload = seg.slice(0, dot), sig = seg.slice(dot + 1);
+        const want = await hmacHex(env.UPLOAD_KEY || "", payload);
+        if (sig !== want) return new Response("invalid link", { status: 403 });
+        let t;
+        try { t = JSON.parse(decodeURIComponent(escape(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))))); } catch (e) { return new Response("bad link", { status: 400 }); }
+        if (!t.exp || t.exp < Math.floor(Date.now() / 1000)) return new Response("link expired — go back and click download again", { status: 410 });
+        if (t.kind !== "ext") return new Response("bad link", { status: 400 });
+        const extObj = await getExtMovies(env);
+        const m = extObj[t.id];
+        if (!m) return new Response("not found", { status: 404 });
+        const srcs = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
+        const s = srcs[t.src || 0] || srcs[0];
+        // Main-bucket sources keep the tokenized stream path.
+        const dk = r2KeyOf(s.url);
+        if (dk) {
+          const tok = await mintStreamToken(env, dk);
+          return Response.redirect(url.origin + "/stream/" + dk.split("/").map(encodeURIComponent).join("/") + "?t=" + tok + "&download=1", 302);
+        }
+        // Other hosts: stream the file back with an attachment
+        // disposition so Chrome downloads instead of playing it.
+        let up;
+        try {
+          const fwd = {};
+          const range = request.headers.get("range");
+          if (range) fwd.range = range;
+          up = await fetch(s.url, { method: request.method, headers: fwd });
+        } catch (e) { return new Response("download source unreachable", { status: 502 }); }
+        if (up.status >= 400) return new Response("download source returned " + up.status, { status: up.status });
+        const base = s.url.split("?")[0].split("/").pop() || "download";
+        const fname = decodeURIComponent(base).replace(/"/g, "");
+        const h = {
+          "content-type": up.headers.get("content-type") || mimeType(fname),
+          "content-disposition": 'attachment; filename="' + fname + '"',
+          "accept-ranges": "bytes",
+          "cache-control": "no-store, private",
+        };
+        const clen = up.headers.get("content-length");
+        if (clen) h["content-length"] = clen;
+        const cr = up.headers.get("content-range");
+        if (cr) h["content-range"] = cr;
+        if (request.method === "HEAD") return new Response(null, { status: up.status, headers: h });
+        return new Response(up.body, { status: up.status, headers: h });
       }
       if (path.startsWith("/dl/") && request.method === "GET") {
         const [, , bucket, ...keyParts] = path.split("/");
