@@ -85,7 +85,10 @@ async function streamUrlFor(env, u) {
 // via cosmetic filtering, and a no-cors fetch probe to the ad domain
 // (network-level blockers reject it). A probe timeout counts as
 // inconclusive, not blocked, so a slow network alone never walls anyone.
-const ADBLOCK_WALL = `<div id="adblock-bait" class="ads adsbygoogle ad-banner adsbox" style="width:10px;height:10px;position:absolute;left:0;top:0;"></div>
+// DISABLED 2026-11-12 (his call, "for now"): flip the flag back to
+// true to re-enable the wall — the code stays in place.
+const ADBLOCK_WALL_ENABLED = false;
+const ADBLOCK_WALL = ADBLOCK_WALL_ENABLED ? `<div id="adblock-bait" class="ads adsbygoogle ad-banner adsbox" style="width:10px;height:10px;position:absolute;left:0;top:0;"></div>
 <div id="adblock-wall" style="display:none;position:fixed;inset:0;z-index:999999;background:#0b120e;color:#e8f0ea;text-align:center;padding:24px;overflow:auto;">
 <div style="max-width:440px;margin:18vh auto 0;">
 <div style="font-size:48px;">🛡️</div>
@@ -145,7 +148,7 @@ const ADBLOCK_WALL = `<div id="adblock-bait" class="ads adsbygoogle ad-banner ad
     },600);
   });
 })();
-</script>`;
+</script>` : '';
 
 // ---------- SigV4 ----------
 async function sha256Hex(data) {
@@ -224,6 +227,45 @@ const bufToText = (buf) => new TextDecoder().decode(buf);
 // Site browsing stays open: sign-in is optional, only for personal history.
 const GOOGLE_CLIENT_ID = "401417620222-de0ve4jhi8vcqedihpo1n3gpsi7md4hi.apps.googleusercontent.com";
 const GOOGLE_REDIRECT_URI = "https://redowansky.bond/auth/callback";
+// ---- Amazon sign-in (Login with Amazon, mirrors Google above) ----
+// Same shape: site uses the OAuth code flow with redirect
+// https://redowansky.bond/auth/amazon/callback (must be a registered
+// Allowed Return URL on the LWA security profile's Web Settings);
+// the app sends its LWA SDK access token as a Bearer header and the
+// Worker verifies it via Amazon's tokeninfo + profile endpoints.
+// Progress is keyed by "amzn:<amazon user_id>", namespaced away from
+// Google subs. Client secret lives in the AMAZON_CLIENT_SECRET Worker
+// secret; the client ID is public (it travels in the authorize URL)
+// and is filled in once the security profile exists. Until both are
+// set, /auth/amazon/login answers 503, exactly like Google's guard.
+const AMAZON_CLIENT_ID = "AMAZON_CLIENT_ID_NOT_SET";
+const AMAZON_REDIRECT_URI = "https://redowansky.bond/auth/amazon/callback";
+function b64url(buf) {
+  const bytes = new Uint8Array(buf);
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+async function pkcePair() {
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return { verifier, challenge: b64url(digest) };
+}
+async function verifyAmazonAccessToken(token) {
+  if (!token || !AMAZON_CLIENT_ID || AMAZON_CLIENT_ID.startsWith("AMAZON_")) return null;
+  try {
+    const r = await fetch("https://api.amazon.com/auth/o2/tokeninfo?access_token=" + encodeURIComponent(token));
+    if (!r.ok) return null;
+    const t = await r.json();
+    if (t.aud !== AMAZON_CLIENT_ID) return null;
+    if (t.exp && Number(t.exp) * 1000 < Date.now()) return null;
+    const p = await fetch("https://api.amazon.com/user/profile", { headers: { Authorization: "Bearer " + token } });
+    if (!p.ok) return null;
+    const prof = await p.json();
+    if (!prof.user_id) return null;
+    return { sub: "amzn:" + String(prof.user_id), email: prof.email || "", name: prof.name || "" };
+  } catch { return null; }
+}
 function b64urlDecode(s) {
   try {
     const b = s.replace(/-/g, "+").replace(/_/g, "/");
@@ -353,7 +395,7 @@ section.row{padding:0 12px}
 </style><script data-cfasync="false" src="https://aarems.org/1/8a50be483ddba782392f8d2b164694b9"></script></head><body>
 <header id="hdr"><div class="logo" onclick="location.href='/'">🎬 Redowansky</div>
 <nav><a class="on" data-f="movie">Movies</a><a data-f="series">TV Series</a></nav>
-<div class="search"><input id="q" placeholder="Search titles..." oninput="doSearch(this.value)"></div><div id="authbox"><a href="/auth/login" style="color:#00e676;text-decoration:none">Sign in with Google</a></div></header>
+<div class="search"><input id="q" placeholder="Search titles..." oninput="doSearch(this.value)"></div><div id="authbox"><a href="/auth/login" style="color:#00e676;text-decoration:none">Sign in with Google</a> · <a href="/auth/amazon/login" style="color:#00e676;text-decoration:none">Sign in with Amazon</a></div></header>
 <div class="hero" id="hero" style="display:none"><div id="hslides" style="position:absolute;inset:0"></div>
 <div class="hero-prog" id="hprog"></div></div>
 <div class="browse-ad" style="display:flex;justify-content:center;padding:18px 10px 2px"><div data-mndbanid="e7f1fcbf-d6f7-4ef5-afe1-b2005cc6e66c"></div></div>
@@ -412,7 +454,7 @@ async function loadSync(){
     var box=$('authbox');
     if(box){
       if(me.signedIn){box.innerHTML='<span style="color:#e8f5e9">'+(me.name||'Signed in')+'</span> · <a href="/auth/logout" style="color:#7a9a85;text-decoration:none">Sign out</a>';}
-      else{box.innerHTML='<a href="/auth/login" style="color:#00e676;text-decoration:none">Sign in with Google</a>';}
+      else{box.innerHTML='<a href="/auth/login" style="color:#00e676;text-decoration:none">Sign in with Google</a> · <a href="/auth/amazon/login" style="color:#00e676;text-decoration:none">Sign in with Amazon</a>';}
     }
     if(!me.signedIn)return;
     var d=await (await fetch('/api/progress')).json();
@@ -1929,6 +1971,43 @@ export class TunnelDO {
         return new Response(null, { status: 302, headers: { Location: "/", "Set-Cookie": sessionCookie(sid, 30 * 24 * 3600) } });
       } catch (e) { return new Response("Google sign-in error: " + String(e.message || e).slice(0, 200), { status: 502 }); }
     }
+    // ---- Amazon sign-in (Login with Amazon, mirrors Google above) ----
+    if (path === "/auth/amazon/login" && request.method === "GET") {
+      if (!env.AMAZON_CLIENT_SECRET || !AMAZON_CLIENT_ID || AMAZON_CLIENT_ID.startsWith("AMAZON_")) return new Response("Amazon sign-in is not configured yet (security profile missing)", { status: 503 });
+      const state = [...crypto.getRandomValues(new Uint8Array(24))].map(b => b.toString(16).padStart(2, "0")).join("");
+      const pkce = await pkcePair();
+      await env.DATA_KV.put("oauth-amzn-state:" + state, pkce.verifier, { expirationTtl: 600 });
+      const q = new URLSearchParams({
+        client_id: AMAZON_CLIENT_ID, redirect_uri: AMAZON_REDIRECT_URI,
+        response_type: "code", scope: "profile", state,
+        code_challenge: pkce.challenge, code_challenge_method: "S256",
+      });
+      return Response.redirect("https://www.amazon.com/ap/oa?" + q.toString(), 302);
+    }
+    if (path === "/auth/amazon/callback" && request.method === "GET") {
+      const code = url.searchParams.get("code"), state = url.searchParams.get("state");
+      if (!code || !state) return new Response("missing code/state", { status: 400 });
+      const verifier = await env.DATA_KV.get("oauth-amzn-state:" + state);
+      if (!verifier) return new Response("expired or invalid sign-in — try again", { status: 400 });
+      await env.DATA_KV.delete("oauth-amzn-state:" + state);
+      if (!env.AMAZON_CLIENT_SECRET || !AMAZON_CLIENT_ID || AMAZON_CLIENT_ID.startsWith("AMAZON_")) return new Response("Amazon sign-in is not configured yet", { status: 503 });
+      try {
+        const form = new URLSearchParams({
+          grant_type: "authorization_code", code, redirect_uri: AMAZON_REDIRECT_URI,
+          client_id: AMAZON_CLIENT_ID, client_secret: env.AMAZON_CLIENT_SECRET,
+          code_verifier: verifier,
+        });
+        const tr = await fetch("https://api.amazon.com/auth/o2/token", { method: "POST", body: form });
+        const tj = await tr.json();
+        if (!tj.access_token) return new Response("Amazon sign-in failed", { status: 502 });
+        const user = await verifyAmazonAccessToken(tj.access_token);
+        if (!user) return new Response("Amazon sign-in verification failed", { status: 502 });
+        const sid = [...crypto.getRandomValues(new Uint8Array(24))].map(b => b.toString(16).padStart(2, "0")).join("");
+        const exp = Date.now() + 30 * 24 * 3600 * 1000;
+        await env.DATA_KV.put("session:" + sid, JSON.stringify({ sub: user.sub, name: user.name, email: user.email, provider: "amazon", exp }), { expirationTtl: 30 * 24 * 3600 });
+        return new Response(null, { status: 302, headers: { Location: "/", "Set-Cookie": sessionCookie(sid, 30 * 24 * 3600) } });
+      } catch (e) { return new Response("Amazon sign-in error: " + String(e.message || e).slice(0, 200), { status: 502 }); }
+    }
     if (path === "/auth/logout" && request.method === "GET") {
       const s = await sessionFromRequest(env, request);
       if (s) await env.DATA_KV.delete("session:" + s.id);
@@ -1937,7 +2016,7 @@ export class TunnelDO {
     if (path === "/auth/me" && request.method === "GET") {
       const s = await sessionFromRequest(env, request);
       if (!s) return json({ signedIn: false });
-      return json({ signedIn: true, name: s.name || "", email: s.email || "" });
+      return json({ signedIn: true, name: s.name || "", email: s.email || "", provider: s.provider || "google" });
     }
     // v0.6.27 gate: one line covers GET/POST/DELETE below.
     if (path === "/api/progress" && appVersionBlocked(request)) return appVersionRefused();
@@ -1951,6 +2030,12 @@ export class TunnelDO {
         const tok = auth.startsWith("Bearer ") ? auth.slice(7) : "";
         const user = await verifyGoogleIdToken(tok);
         if (user) { sub = user.sub; name = user.name || ""; }
+      }
+      if (!sub) {
+        const auth = request.headers.get("Authorization") || "";
+        const tok = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        const auser = await verifyAmazonAccessToken(tok);
+        if (auser) { sub = auser.sub; name = auser.name || ""; }
       }
       if (!sub) return json({ signedIn: false, entries: [] });
       try {
@@ -1974,6 +2059,12 @@ export class TunnelDO {
         const tok = auth.startsWith("Bearer ") ? auth.slice(7) : "";
         const user = await verifyGoogleIdToken(tok);
         if (user) { sub = user.sub; who = "token"; }
+      }
+      if (!sub) {
+        const auth = request.headers.get("Authorization") || "";
+        const tok = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        const auser = await verifyAmazonAccessToken(tok);
+        if (auser) { sub = auser.sub; who = "amazon-token"; }
       }
       if (!sub) return json({ error: "not signed in" }, 401);
       let b = {};
@@ -2186,14 +2277,14 @@ export class TunnelDO {
           + "<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.6;color:#222}h1{font-size:24px}h2{font-size:18px;margin-top:28px}a{color:#0a6}</style></head><body>"
           + "<h1>Privacy Policy — Redowansky Library</h1><p>Effective: October 30, 2026. This policy covers the Redowansky Library Android app and the redowansky.bond website.</p>"
           + "<h2>Information we collect</h2><ul>"
-          + "<li><b>Account information (only if you sign in):</b> when you sign in with Google, we receive your name, email address and profile photo from Google. This runs your account and syncs your watch progress across devices.</li>"
+          + "<li><b>Account information (only if you sign in):</b> when you sign in with Google or Amazon, we receive your name and email address (and profile photo from Google) from that provider. This runs your account and syncs your watch progress across devices.</li>"
           + "<li><b>Watch progress and preferences:</b> what you watched, where you stopped, and your download list, so Continue Watching and sync work.</li>"
           + "<li><b>Movie requests:</b> if you use “Ask for a Movie”, your message is stored and emailed to the developer so the request can be handled.</li>"
           + "<li><b>Push notification token (only if you allow notifications):</b> a device token used to send notifications. No notification content is stored.</li>"
           + "<li><b>Advertising identifiers:</b> the app shows ads from Google AdMob and Mondiad. Those ad partners may collect device information and advertising identifiers to serve ads, under their own privacy policies.</li>"
           + "</ul><p>We do not collect payment information — there are no purchases inside the app.</p>"
           + "<h2>How information is used</h2><p>To run the app, sync your progress, respond to your requests, send notifications you allowed, and show ads that keep the service free.</p>"
-          + "<h2>Sharing</h2><p>We do not sell your personal information. It is shared only with the service providers needed to run the app: Google (sign-in and sync) and the ad partners named above.</p>"
+          + "<h2>Sharing</h2><p>We do not sell your personal information. It is shared only with the service providers needed to run the app: Google or Amazon (sign-in and sync) and the ad partners named above.</p>"
           + "<h2>Your choices</h2><p>You can use the app without signing in — your progress then stays on your device only. You can ask us to delete your synced account data at any time by contacting us at the address below.</p>"
           + "<h2>Children</h2><p>The app is not directed at children under 13, and we do not knowingly collect information from them.</p>"
           + "<h2>Changes</h2><p>This policy may be updated from time to time; the current version is always published on this page.</p>"
