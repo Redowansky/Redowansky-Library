@@ -1100,7 +1100,8 @@ async function delExternal(btn){
 }
 // ---- Approval queue ----
 let pendTabCur="pending", pendCache={pending:[],rejected:[]};
-function pendEsc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+function pendEsc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
+function pendImgUrl(p){if(!p)return "";var s=String(p);if(/[\\s"'<>]/.test(s))return "";if(s.indexOf("http")===0)return s;if(s.charAt(0)==="/")return "https://image.tmdb.org/t/p/w185"+s;return "";}
 async function loadPending(){
   const box=document.getElementById("pendList"); if(!box)return;
   box.innerHTML="<p style='color:#7a9a85'>loading queue…</p>";
@@ -1118,7 +1119,7 @@ function renderPend(){
   const list=pendCache[pendTabCur]||[];
   if(!list.length){box.innerHTML="<p style='color:#7a9a85;font-size:.85rem'>"+(pendTabCur==="pending"?"Nothing waiting for approval.":"No rejected candidates.")+"</p>";return;}
   box.innerHTML=list.map(function(c){
-    const poster=c.poster?("<img src='"+pendEsc(String(c.poster).indexOf("http")===0?c.poster:("https://image.tmdb.org/t/p/w185"+c.poster))+"' style='width:46px;border-radius:6px' onerror='this.remove()'>"):"";
+    const pu=pendImgUrl(c.poster);const poster=pu?("<img src='"+pendEsc(pu)+"' style='width:46px;border-radius:6px' onerror='this.remove()'>"):"";
     const srcs=(c.sources||[]).map(function(s){return "<div style='font-size:.82rem;color:#7a9a85'>🔗 "+pendEsc(s.label||"Source")+" — "+pendEsc(s.url)+"</div>";}).join("");
     const det="<div id='pd-"+c.id+"' style='display:none;margin-top:8px;padding:10px;background:#060906;border-radius:8px;font-size:.85rem;line-height:1.6'>"
       +"<div><b>TMDB:</b> "+pendEsc(c.tmdb||"—")+" · <b>Type:</b> "+pendEsc(c.type)+" · <b>Found via:</b> "+pendEsc(c.discoveredVia||"—")+" · "+new Date(c.createdAt||0).toLocaleString()+"</div>"
@@ -2639,8 +2640,9 @@ export class TunnelDO {
           const extObjPre = await getExtMovies(env);
           for (const k in extObjPre) if (extObjPre[k].pendingId === id) {
             delete pend[id];
-            try { await savePending(env, pend); } catch (e) {}
-            return json({ ok: true, id: k, title: extObjPre[k].title, already: true });
+            let cleanupOk = true;
+            try { await savePending(env, pend); } catch (e) { cleanupOk = false; }
+            return json({ ok: true, id: k, title: extObjPre[k].title, already: true, ...(cleanupOk ? {} : { pendingCleanup: "failed" }) });
           }
           if (cand.status !== "pending") return json({ error: "not pending (status: " + cand.status + ")" }, 400);
           if (!cand.sources || !cand.sources.length) return json({ error: "need at least one playback source to approve" }, 400);
