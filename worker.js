@@ -208,10 +208,13 @@ async function adminPw(env, state) {
     const stored = state && state.storage ? await state.storage.get("admin_pw") : null;
     if (stored) return stored;
   } catch (e) {}
-  return env.ADMIN_PW || "library2026";
+  // No fallback password: if nothing is stored and no ADMIN_PW secret is
+  // set, admin access is denied (a hardcoded fallback used to live here).
+  return env.ADMIN_PW || null;
 }
 async function checkPw(url, env, state) {
-  return url.searchParams.get("pw") === await adminPw(env, state);
+  const pw = await adminPw(env, state);
+  return !!pw && url.searchParams.get("pw") === pw;
 }
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
