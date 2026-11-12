@@ -1,0 +1,93 @@
+const GATE_PAGE = (title, sub, desc, srcInfos, viewUrl, src0) => {
+  var infos = (srcInfos && srcInfos.length) ? srcInfos : [{ label: "Download", fmt: null, size: null, date: null }];
+  var hot = src0 || 0;
+  function esc(s){ return String(s == null ? "" : s); }
+  var blocks = infos.map(function(s, i){
+    var meta = [esc(s.fmt), esc(s.size), esc(s.date)].filter(function(x){ return x; }).join(" · ");
+    return '<div class="srcblock' + (i === hot ? ' hot' : '') + '">'
+      + '<div class="srclabel">' + esc(s.label) + '</div>'
+      + (meta ? '<div class="srcmeta">' + meta + '</div>' : '')
+      + '<button class="dlbtn" data-src="' + i + '" disabled>⭳ Download — ' + esc(s.label) + '</button>'
+      + '</div>';
+  }).join("");
+  var streamBtn = viewUrl ? '<a class="stream" href="' + viewUrl + '">▶ Stream Online</a>' : '';
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<script async src="https://ss.mrmnd.com/banner.js"></script>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Download ${title} — Redowansky's Library</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+.card{background:linear-gradient(180deg,#101b14,#0c1410);border:1px solid #1e3a2a;border-radius:20px;padding:36px 32px;max-width:520px;width:100%}
+.ico{font-size:3rem;margin-bottom:12px}
+h1{font-size:1.25rem;margin-bottom:6px;word-break:break-word}
+.meta{color:#7a9a85;font-size:.85rem;margin-bottom:20px}
+.adslot{background:#0a120c;border:1px dashed #1e3a2a;border-radius:12px;min-height:120px;display:flex;align-items:center;justify-content:center;color:#55556a;font-size:.8rem;margin-bottom:20px;padding:16px;overflow:hidden}
+.srcblock{border:1px solid #1e3a2a;border-radius:14px;padding:16px;margin-bottom:14px;background:#0a120c}
+.srcblock.hot{border-color:#00e676}
+.srclabel{font-weight:700;margin-bottom:4px}
+.srcmeta{color:#7a9a85;font-size:.85rem;margin-bottom:12px}
+.note{color:#7a9a85;font-size:.85rem;margin-bottom:16px;line-height:1.5}
+.status{color:#7a9a85;font-size:.88rem;min-height:1.2em;margin-bottom:16px}
+.tswrap{display:flex;justify-content:center;margin-bottom:18px;min-height:65px}
+.dlbtn{display:block;width:100%;background:linear-gradient(90deg,#00c853,#69f0ae);color:#fff;border:none;text-decoration:none;font-weight:700;font-size:1.02rem;padding:14px 20px;border-radius:12px;box-shadow:0 8px 26px rgba(0,230,118,.35);cursor:pointer}
+.dlbtn[disabled]{background:#1c2b21;color:#5f7a68;box-shadow:none;cursor:not-allowed}
+.stream{display:block;margin-top:14px;background:#122a1c;border:1px solid #2a5a3a;color:#e8f5e9;text-decoration:none;font-weight:700;font-size:1rem;padding:14px 20px;border-radius:12px}
+.wall{display:none;background:#2a1215;border:1px solid #6e2a30;color:#ffb3ba;border-radius:12px;padding:18px;font-size:.92rem;line-height:1.5}
+.back{display:inline-block;margin-top:18px;color:#00e676;text-decoration:none;font-size:.9rem}
+</style></head><body>
+<div class="card">
+<div class="ico">📥</div>
+<h1>${title}</h1>
+<div class="meta">${sub}</div>
+<div class="adslot" id="adslot"><div data-mndbanid="b03e1301-6a18-445b-8cfe-9150397c75dd"></div></div>
+<div id="gateMain">
+<div class="note">Downloads are free because ads pay for the library — each download takes 3 clicks: 2 ads, then your file.</div>
+${blocks}
+<div class="status" id="status">Complete the human check below to unlock the downloads.</div>
+<div class="tswrap"><div class="cf-turnstile" data-sitekey="${TS_SITEKEY}" data-callback="tsOk"></div></div>
+${streamBtn}
+<a class="back" href="/">← back to library</a>
+</div>
+<div class="wall" id="wall">🚫 <b>Adblock detected.</b><br>Downloads are free because ads pay for the library.<br>Please disable your adblocker for this site and refresh the page.</div>
+</div>
+<div id="bait" class="ad adsbox ad-banner pub_300x250" style="height:1px;font-size:1px;line-height:1px">&nbsp;</div>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<script>
+var DESC=${JSON.stringify(desc)};
+var tsToken=null,blocked=false,busy=false,clicks=0;
+var st=document.getElementById("status");
+var btns=document.querySelectorAll(".dlbtn");
+function tsOk(t){tsToken=t;if(blocked)return;btns.forEach(function(b){b.disabled=false;});st.textContent="Ready — each download takes 3 clicks: 2 ads, then your file.";}
+setTimeout(function(){
+  var bait=document.getElementById("bait");
+  var hidden=!bait||bait.offsetHeight===0||bait.offsetParent===null;
+  if(!hidden){var cs=getComputedStyle(bait);if(cs.display==="none"||cs.visibility==="hidden")hidden=true;}
+  if(hidden){blocked=true;document.getElementById("gateMain").style.display="none";document.getElementById("wall").style.display="block";}
+},1500);
+function showAd(){
+  var s=document.createElement("script");
+  s.async=true;s.src="https://ss.mrmnd.com/interstitial.js";
+  s.setAttribute("data-mndintid","206f947f-813c-4f71-aedc-ffd005412447");
+  document.head.appendChild(s);
+}
+btns.forEach(function(b){b.onclick=function(){
+  if(busy||b.disabled)return;
+  clicks++;
+  if(clicks<=2){showAd();st.textContent="Ad "+clicks+" of 2 shown — click any Download button again to continue.";return;}
+  busy=true;var old=b.textContent;b.textContent="Checking…";
+  fetch("/api/gate/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({desc:DESC,src:parseInt(b.getAttribute("data-src"),10)||0,token:tsToken})})
+  .then(function(r){return r.json();})
+  .then(function(j){
+    if(j&&j.go){location.href=j.go;return;}
+    busy=false;clicks=0;tsToken=null;b.textContent=old;
+    btns.forEach(function(x){x.disabled=true;});
+    st.textContent="❌ "+((j&&j.error)||"verification failed — refresh and try again.")+" Complete the human check again.";
+    if(window.turnstile)turnstile.reset();
+  })
+  .catch(function(){busy=false;b.textContent=old;st.textContent="❌ Network error — refresh and try again.";});
+};});
+</script>
+<div style="text-align:center;padding:14px;color:#5f7a68;font-size:.82rem">👀 __VIEWS_TODAY__ viewers today</div>
+</body></html>`;
+};
