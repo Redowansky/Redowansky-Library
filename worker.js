@@ -481,8 +481,8 @@ async function loadSync(){
       if(!link)return '';
       var pct=Math.min(100,Math.round(e.pos/e.dur*100));
       var poster=e.poster?(e.poster.startsWith('http')?e.poster:IMG+e.poster):(m&&m.poster?(m.poster.startsWith('http')?m.poster:IMG+m.poster):'');
-      var p=poster?'<img loading="lazy" src="'+poster+'" alt="" style="width:110px;height:165px;object-fit:cover;border-radius:8px">':'<div style="width:110px;height:165px;display:flex;align-items:center;justify-content:center;font-size:2rem;background:#0a120c;border-radius:8px">🎬</div>';
-      return '<a href="'+link+'?start='+Math.floor(e.pos)+'" style="text-decoration:none;color:inherit;flex:0 0 110px">'+p+'<div style="padding:6px 2px"><b style="font-size:.8rem;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+e.title+'</b><span style="font-size:.72rem;color:#7a9a85">'+(e.done?'✓ Watched':fmtLeft(e.dur-e.pos))+'</span><div style="height:4px;background:#1e3a2a;border-radius:2px;margin-top:4px"><div style="height:4px;width:'+pct+'%;background:#00e676;border-radius:2px"></div></div></div></a>';
+      var p=poster?'<img loading="lazy" src="'+escH(poster)+'" alt="" style="width:110px;height:165px;object-fit:cover;border-radius:8px">':'<div style="width:110px;height:165px;display:flex;align-items:center;justify-content:center;font-size:2rem;background:#0a120c;border-radius:8px">🎬</div>';
+      return '<a href="'+link+'?start='+Math.floor(e.pos)+'" style="text-decoration:none;color:inherit;flex:0 0 110px">'+p+'<div style="padding:6px 2px"><b style="font-size:.8rem;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escH(e.title)+'</b><span style="font-size:.72rem;color:#7a9a85">'+(e.done?'✓ Watched':fmtLeft(e.dur-e.pos))+'</span><div style="height:4px;background:#1e3a2a;border-radius:2px;margin-top:4px"><div style="height:4px;width:'+pct+'%;background:#00e676;border-radius:2px"></div></div></div></a>';
     }).join('');
     if(recent)html+='<section class="row"><h2>⏱ Recently Played</h2><div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:10px">'+recent+'</div></section>';
     if(html){
@@ -491,10 +491,11 @@ async function loadSync(){
     }
   }catch(e){}
 }
+function escH(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 function card(m){
-  const p=m.poster?'<img loading="lazy" src="'+(m.poster.startsWith('http')?m.poster:IMG+m.poster)+'" alt="">':'<div class="noposter">'+(m.type==='song'?'🎵':'🎬')+'</div>';
+  const p=m.poster?'<img loading="lazy" src="'+escH(m.poster.startsWith('http')?m.poster:IMG+m.poster)+'" alt="">':'<div class="noposter">'+(m.type==='song'?'🎵':'🎬')+'</div>';
   const js=JSON.stringify(m).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-  return '<div class="card" onclick="openModal('+js+')">'+p+'<div class="cinfo"><b>'+m.title+'</b><span>'+(m.year||'')+' '+(m.vote?'★ '+m.vote:'')+'</span></div></div>';
+  return '<div class="card" onclick="openModal('+js+')">'+p+'<div class="cinfo"><b>'+escH(m.title)+'</b><span>'+(m.year||'')+' '+(m.vote?'★ '+m.vote:'')+'</span></div></div>';
 }
 function render(filter,q){
   q=(q||'').toLowerCase();
@@ -512,10 +513,10 @@ function doSearch(q){const f=document.querySelector('nav a.on').dataset.f;render
 document.querySelectorAll('nav a').forEach(a=>a.onclick=()=>{document.querySelectorAll('nav a').forEach(x=>x.classList.remove('on'));a.classList.add('on');$('q').value='';render(a.dataset.f,'');});
 function openModal(m){
   $('mhero').style.backgroundImage=m.backdrop?'url('+BG+m.backdrop+')':(m.poster&&m.poster.startsWith('http')?'url('+m.poster+')':'none');
-  var genres=(m.genres||[]).map(function(g){return '<span>'+g+'</span>';}).join('');
+  var genres=(m.genres||[]).map(function(g){return '<span>'+escH(g)+'</span>';}).join('');
   var vurl=m.external?'/view/ext/'+m.id:'/view/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
   var durl=m.external?'/download/ext/'+m.id:'/dl/'+encodeURIComponent(m.bucket)+'/'+m.key.split('/').map(encodeURIComponent).join('/');
-  $('minfo').innerHTML='<h2>'+m.title+'</h2><div class="mmeta"><span class="rate">★ '+(m.vote||'—')+'</span><span>'+(m.year||'')+'</span><span>'+(m.type==='song'?'Video Song':m.type==='series'?'TV Series':'Movie')+'</span>'+(m.episodes&&m.episodes.length?'<span>'+m.episodes.length+' Episodes</span>':'')+'</div><p>'+(m.overview||'No overview available.')+'</p><div class="genres">'+genres+'</div><div class="hero-btns"><a class="btn btn-play" href="'+vurl+'">▶ Play</a>'+(m.type==='series'?'':'<a class="btn btn-info" href="'+durl+'">⭳ Download</a>')+'</div>';
+  $('minfo').innerHTML='<h2>'+escH(m.title)+'</h2><div class="mmeta"><span class="rate">★ '+(m.vote||'—')+'</span><span>'+(m.year||'')+'</span><span>'+(m.type==='song'?'Video Song':m.type==='series'?'TV Series':'Movie')+'</span>'+(m.episodes&&m.episodes.length?'<span>'+m.episodes.length+' Episodes</span>':'')+'</div><p>'+escH(m.overview||'No overview available.')+'</p><div class="genres">'+genres+'</div><div class="hero-btns"><a class="btn btn-play" href="'+vurl+'">▶ Play</a>'+(m.type==='series'?'':'<a class="btn btn-info" href="'+durl+'">⭳ Download</a>')+'</div>';
   $('modal').classList.add('open');
 }
 function closeModal(){$('modal').classList.remove('open');}
@@ -551,6 +552,28 @@ async function getPending(env){
 }
 async function savePending(env, obj){
   await env.DATA_KV.put("ext:pending", JSON.stringify(obj));
+}
+// URL hygiene for catalogue images/sources (Phase 1 test-pass review):
+// poster/backdrop must be an http(s) URL or a TMDB path — no quotes,
+// angle brackets or whitespace — so they can never break out of an HTML
+// attribute at any render site. Source URLs must not carry a dangerous
+// scheme (javascript:/data:/vbscript:/file:); scheme-less paths (R2 keys)
+// and http(s) URLs pass through.
+function cleanImgUrl(u){
+  if (u == null) return null;
+  const s = String(u).trim();
+  if (!s || /[\s"'<>]/.test(s)) return null;
+  if (s[0] === "/") return s;
+  if (/^https?:\/\//i.test(s)) return s;
+  return null;
+}
+function cleanSrcUrl(u){
+  if (u == null) return null;
+  const s = String(u).trim();
+  if (!s || /[\s"'<>]/.test(s)) return null;
+  const m = s.match(/^([a-z][a-z0-9+.-]*):/i);
+  if (m && !/^https?$/i.test(m[1])) return null;
+  return s;
 }
 function normTitle(t){
   return (t || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
@@ -1059,7 +1082,7 @@ async function loadExtList(){
   if(!box)return;
   const r=await (await fetch("/api/movies")).json().catch(()=>({movies:[]}));
   const ext=(r.movies||[]).filter(m=>m.external);
-  box.innerHTML=ext.length?ext.map(m=>"<div style='display:flex;align-items:center;gap:10px;padding:8px;background:#060906;border-radius:8px;margin-bottom:6px'><span style='flex:1;font-size:.9rem'>🔗 "+m.title+"</span><button class='btn' style='padding:6px 14px;font-size:.8rem' data-id='"+m.id+"' onclick='ytInfo(this)'>🎬 Video Info</button><button class='btn' style='padding:6px 14px;font-size:.8rem' data-id='"+m.id+"' onclick='delExternal(this)'>Delete</button></div>").join(""):"<p style='color:#7a9a85;font-size:.85rem'>No external links yet.</p>";
+  box.innerHTML=ext.length?ext.map(m=>"<div style='display:flex;align-items:center;gap:10px;padding:8px;background:#060906;border-radius:8px;margin-bottom:6px'><span style='flex:1;font-size:.9rem'>🔗 "+pendEsc(m.title)+"</span><button class='btn' style='padding:6px 14px;font-size:.8rem' data-id='"+m.id+"' onclick='ytInfo(this)'>🎬 Video Info</button><button class='btn' style='padding:6px 14px;font-size:.8rem' data-id='"+m.id+"' onclick='delExternal(this)'>Delete</button></div>").join(""):"<p style='color:#7a9a85;font-size:.85rem'>No external links yet.</p>";
 }
 async function ytInfo(btn){
   const link=prompt("Paste the YouTube link for this video — title and cover will be filled automatically:");
@@ -1127,7 +1150,7 @@ async function addPending(force){
 async function approvePending(btn){const id=btn.dataset.id;
   const r=await api("/api/admin/pending/approve?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});
   const d=await r.json().catch(()=>({}));
-  if(r.ok){alert("✓ Published: "+(d.title||"")+" — now live at /view/ext/"+d.id);loadPending();return;}
+  if(r.ok){alert("✓ Published: "+(d.title||"")+(d.already?" (was already live)":"")+(d.pendingCleanup?" — note: the queue entry could not be removed, tap Approve again to clear it":"")+" — now live at /view/ext/"+d.id);loadPending();return;}
   if(r.status===409&&d.duplicate){if(confirm("Duplicate of "+(d.duplicate.title||"an existing entry")+" ("+(d.duplicate.where||"")+") — approve anyway?")){const r2=await api("/api/admin/pending/approve?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id,force:true})});const d2=await r2.json().catch(()=>({}));if(r2.ok){alert("✓ Published: "+(d2.title||"")+" — now live at /view/ext/"+d2.id);loadPending();}else alert("✗ "+(d2.error||"failed"));}return;}
   alert("✗ "+(d.error||"failed"));
 }
@@ -1652,7 +1675,7 @@ body{background:#060906;color:#e8f5e9;font-family:'Segoe UI',system-ui,sans-seri
 </style></head><body>
 <div class="wrap">
 <div class="head">
-${poster ? `<img src="${poster}" alt="">` : ""}
+${poster ? `<img src="${esc(poster)}" alt="">` : ""}
 <div style="flex:1;min-width:240px">
 <h1>${esc(m.title)}</h1>
 <div class="meta">${esc(metaLine)}</div>
@@ -2033,6 +2056,17 @@ export class TunnelDO {
     return movies;
   }
 
+  // Promise-chain mutex serializing admin KV read-modify-write sequences
+  // (ext:movies + ext:pending). KV puts are last-write-wins with no CAS,
+  // so two near-simultaneous admin calls (e.g. two quick Approve taps)
+  // could otherwise lose each other's update; every admin writer below
+  // runs inside this lock. The chain survives rejections.
+  _withAdminLock(fn){
+    const prev = this._adminLock || Promise.resolve();
+    const next = prev.then(() => fn());
+    this._adminLock = next.catch(() => {});
+    return next;
+  }
   async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -2453,34 +2487,41 @@ export class TunnelDO {
         let srcList = [];
         if (Array.isArray(sources)) {
           for (const s of sources) {
-            if (s && s.url) srcList.push({ label: (s.label || "Version " + (srcList.length + 1)).slice(0, 30), url: toDirectUrlSrv(s.url) });
+            const u = s && s.url ? cleanSrcUrl(s.url) : null;
+            if (u) srcList.push({ label: (s.label || "Version " + (srcList.length + 1)).slice(0, 30), url: toDirectUrlSrv(u) });
           }
         }
         if (!video_url && srcList.length) video_url = srcList[0].url;
         if (!video_url) return json({ error: "need video_url" }, 400);
         video_url = toDirectUrlSrv(video_url);
+        video_url = cleanSrcUrl(video_url);
+        if (!video_url) return json({ error: "invalid video URL" }, 400);
         if (!srcList.length) srcList = [{ label: "Default", url: video_url }];
         const apiKey = (env.TMDB_KEY || await this.state.storage.get("tmdb_key"));
-        let meta = { title: title || video_url, year: null, overview: null, poster: (poster && poster.startsWith("http")) ? poster : null, backdrop: null, vote: null, genres: [], type: type || "movie", tmdb: null };
+        let meta = { title: title || video_url, year: null, overview: null, poster: cleanImgUrl(poster), backdrop: null, vote: null, genres: [], type: type || "movie", tmdb: null };
         if (tmdb_id && apiKey) {
           const d = await tmdbGet("/" + (type || "movie") + "/" + tmdb_id, apiKey);
           if (d) meta = { title: d.title || d.name, year: (d.release_date || d.first_air_date || "").slice(0, 4), overview: d.overview, poster: d.poster_path, backdrop: d.backdrop_path, vote: d.vote_average?.toFixed(1), genres: (d.genres || []).map(x => x.name), type: type || "movie", tmdb: tmdb_id };
         }
-        const id = "e" + Date.now().toString(36);
-        const extObj = await getExtMovies(env);
-        extObj[id] = { id, url: video_url, sources: srcList, ...meta };
-        await saveExtMovies(env, extObj);
-        return json({ ok: true, id, title: meta.title });
+        return this._withAdminLock(async () => {
+          const id = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
+          const extObj = await getExtMovies(env);
+          extObj[id] = { id, url: video_url, sources: srcList, ...meta };
+          await saveExtMovies(env, extObj);
+          return json({ ok: true, id, title: meta.title });
+        });
       }
       // Admin: set poster on an external entry
       if (path === "/api/admin/extposter" && request.method === "POST") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         const { id, poster } = await request.json();
-        const extObj = await getExtMovies(env);
-        if (!extObj[id]) return json({ error: "not found" }, 404);
-        extObj[id].poster = (poster && poster.startsWith("http")) ? poster : null;
-        await saveExtMovies(env, extObj);
-        return json({ ok: true });
+        return this._withAdminLock(async () => {
+          const extObj = await getExtMovies(env);
+          if (!extObj[id]) return json({ error: "not found" }, 404);
+          extObj[id].poster = cleanImgUrl(poster);
+          await saveExtMovies(env, extObj);
+          return json({ ok: true });
+        });
       }
       // Admin: publish/unpublish an external entry (flip unlisted).
       // Lets an embed entry into the home catalog + app feed (listed)
@@ -2488,14 +2529,18 @@ export class TunnelDO {
       if (path === "/api/admin/extpublish" && request.method === "POST") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         const { id, unlisted } = await request.json();
-        const extObj = await getExtMovies(env);
-        if (!extObj[id]) return json({ error: "not found" }, 404);
-        extObj[id].unlisted = !!unlisted;
-        await saveExtMovies(env, extObj);
-        return json({ ok: true, id, unlisted: extObj[id].unlisted });
+        return this._withAdminLock(async () => {
+          const extObj = await getExtMovies(env);
+          if (!extObj[id]) return json({ error: "not found" }, 404);
+          extObj[id].unlisted = !!unlisted;
+          await saveExtMovies(env, extObj);
+          return json({ ok: true, id, unlisted: extObj[id].unlisted });
+        });
       }
       // Admin: pull title + thumbnail from YouTube for an external entry
-      if (path === "/api/admin/ytinfo" && request.method === "POST") {        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+      if (path === "/api/admin/ytinfo" && request.method === "POST") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        return this._withAdminLock(async () => {
         const { id, url: yturl } = await request.json();
         const extObj = await getExtMovies(env);
         if (!extObj[id]) return json({ error: "not found" }, 404);
@@ -2512,15 +2557,18 @@ export class TunnelDO {
         extObj[id].poster = "https://img.youtube.com/vi/" + vid + "/hqdefault.jpg";
         await saveExtMovies(env, extObj);
         return json({ ok: true, title: extObj[id].title, poster: extObj[id].poster });
+        });
       }
       // Admin: delete external movie link
       if (path === "/api/admin/external" && request.method === "DELETE") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         const id = url.searchParams.get("id");
-        const extObj = await getExtMovies(env);
-        delete extObj[id];
-        await saveExtMovies(env, extObj);
-        return json({ ok: true });
+        return this._withAdminLock(async () => {
+          const extObj = await getExtMovies(env);
+          delete extObj[id];
+          await saveExtMovies(env, extObj);
+          return json({ ok: true });
+        });
       }
       // ---- Approval queue (Phase 1) ----
       // List pending + rejected candidates (admin only; nothing here is
@@ -2544,20 +2592,22 @@ export class TunnelDO {
         // Sources are metadata only ({label, url}) — no video is fetched,
         // downloaded, or stored by the queue.
         let srcList = [];
-        if (Array.isArray(body.sources)) for (const s of body.sources) if (s && s.url) srcList.push({ label: (s.label || "Source " + (srcList.length + 1)).slice(0, 30), url: toDirectUrlSrv(s.url) });
+        if (Array.isArray(body.sources)) for (const s of body.sources) { const u = s && s.url ? cleanSrcUrl(s.url) : null; if (u) srcList.push({ label: (s.label || "Source " + (srcList.length + 1)).slice(0, 30), url: toDirectUrlSrv(u) }); }
         const apiKey = (env.TMDB_KEY || await this.state.storage.get("tmdb_key"));
-        let meta = { year: body.year ? String(body.year).slice(0, 4) : null, overview: body.overview || null, poster: (body.poster && String(body.poster).startsWith("http")) ? body.poster : null, backdrop: body.backdrop || null, vote: body.vote != null ? body.vote : null, genres: Array.isArray(body.genres) ? body.genres.slice(0, 10) : [] };
+        let meta = { year: body.year ? String(body.year).slice(0, 4) : null, overview: body.overview || null, poster: cleanImgUrl(body.poster), backdrop: cleanImgUrl(body.backdrop), vote: body.vote != null ? body.vote : null, genres: Array.isArray(body.genres) ? body.genres.slice(0, 10) : [] };
         if (tmdb && apiKey) {
           const d = await tmdbGet("/" + type + "/" + tmdb, apiKey);
           if (d) meta = { year: (d.release_date || d.first_air_date || "").slice(0, 4) || meta.year, overview: d.overview || meta.overview, poster: d.poster_path || meta.poster, backdrop: d.backdrop_path || meta.backdrop, vote: d.vote_average != null ? d.vote_average.toFixed(1) : meta.vote, genres: (d.genres || []).map(x => x.name) };
         }
         const cand = { id: "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title, type, tmdb, sources: srcList, discoveredVia: (body.discoveredVia || "manual").toString().slice(0, 40), note: (body.note || "").toString().slice(0, 500), status: "pending", createdAt: Date.now(), ...meta };
-        const dup = findDuplicate(cand, await this.listMovies(env), await getPending(env), null);
-        if (dup && !body.force) return json({ error: "duplicate", duplicate: dup }, 409);
-        const pend = await getPending(env);
-        pend[cand.id] = cand;
-        await savePending(env, pend);
-        return json({ ok: true, id: cand.id, title: cand.title, duplicate: dup || null });
+        return this._withAdminLock(async () => {
+          const dup = findDuplicate(cand, await this.listMovies(env), await getPending(env), null);
+          if (dup && !body.force) return json({ error: "duplicate", duplicate: dup }, 409);
+          const pend = await getPending(env);
+          pend[cand.id] = cand;
+          await savePending(env, pend);
+          return json({ ok: true, id: cand.id, title: cand.title, duplicate: dup || null });
+        });
       }
       // Approve a candidate: publish it into the live catalogue through
       // the existing ext-entry shape (same fields /api/admin/external
@@ -2572,24 +2622,41 @@ export class TunnelDO {
         let body = {};
         try { body = await request.json(); } catch (e) {}
         const id = (body.id || "").toString();
-        const pend = await getPending(env);
-        const cand = pend[id];
-        if (!cand) {
-          const extObj0 = await getExtMovies(env);
-          for (const k in extObj0) if (extObj0[k].pendingId === id) return json({ ok: true, id: k, title: extObj0[k].title, already: true });
-          return json({ error: "not found" }, 404);
-        }
-        if (cand.status !== "pending") return json({ error: "not pending (status: " + cand.status + ")" }, 400);
-        if (!cand.sources || !cand.sources.length) return json({ error: "need at least one playback source to approve" }, 400);
-        const dup = findDuplicate(cand, await this.listMovies(env), pend, id);
-        if (dup && !body.force) return json({ error: "duplicate", duplicate: dup }, 409);
-        const liveId = "e" + Date.now().toString(36);
-        const extObj = await getExtMovies(env);
-        extObj[liveId] = { id: liveId, pendingId: id, url: cand.sources[0].url, sources: cand.sources, title: cand.title, year: cand.year || null, overview: cand.overview || null, poster: cand.poster || null, backdrop: cand.backdrop || null, vote: cand.vote || null, genres: cand.genres || [], type: cand.type || "movie", tmdb: cand.tmdb || null };
-        await saveExtMovies(env, extObj);
-        delete pend[id];
-        await savePending(env, pend);
-        return json({ ok: true, id: liveId, title: cand.title });
+        return this._withAdminLock(async () => {
+          const pend = await getPending(env);
+          const cand = pend[id];
+          if (!cand) {
+            const extObj0 = await getExtMovies(env);
+            for (const k in extObj0) if (extObj0[k].pendingId === id) return json({ ok: true, id: k, title: extObj0[k].title, already: true });
+            return json({ error: "not found" }, 404);
+          }
+          // Partial-failure self-heal: a previous approve may have saved
+          // the live entry but died before deleting the candidate. The
+          // duplicate check below would 409 on the entry we just
+          // published (same TMDB/title) — detect it first, drop the stale
+          // queue entry, and report the existing live entry instead of
+          // duplicating it.
+          const extObjPre = await getExtMovies(env);
+          for (const k in extObjPre) if (extObjPre[k].pendingId === id) {
+            delete pend[id];
+            try { await savePending(env, pend); } catch (e) {}
+            return json({ ok: true, id: k, title: extObjPre[k].title, already: true });
+          }
+          if (cand.status !== "pending") return json({ error: "not pending (status: " + cand.status + ")" }, 400);
+          if (!cand.sources || !cand.sources.length) return json({ error: "need at least one playback source to approve" }, 400);
+          const cleanSources = cand.sources.map(s => ({ label: s.label, url: cleanSrcUrl(s.url) })).filter(s => s.url);
+          if (!cleanSources.length) return json({ error: "playback source URL invalid" }, 400);
+          const dup = findDuplicate(cand, await this.listMovies(env), pend, id);
+          if (dup && !body.force) return json({ error: "duplicate", duplicate: dup }, 409);
+          const liveId = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
+          const extObj = await getExtMovies(env);
+          extObj[liveId] = { id: liveId, pendingId: id, url: cleanSources[0].url, sources: cleanSources, title: cand.title, year: cand.year || null, overview: cand.overview || null, poster: cleanImgUrl(cand.poster), backdrop: cleanImgUrl(cand.backdrop), vote: cand.vote || null, genres: cand.genres || [], type: cand.type || "movie", tmdb: cand.tmdb || null };
+          await saveExtMovies(env, extObj);
+          delete pend[id];
+          let cleanupOk = true;
+          try { await savePending(env, pend); } catch (e) { cleanupOk = false; }
+          return json({ ok: true, id: liveId, title: cand.title, ...(cleanupOk ? {} : { pendingCleanup: "failed" }) });
+        });
       }
       // Reject a candidate: stays in the queue under "rejected", never
       // appears publicly. Rejected entries can be approved no more —
@@ -2599,14 +2666,16 @@ export class TunnelDO {
         let body = {};
         try { body = await request.json(); } catch (e) {}
         const id = (body.id || "").toString();
-        const pend = await getPending(env);
-        const cand = pend[id];
-        if (!cand) return json({ error: "not found" }, 404);
-        if (cand.status === "rejected") return json({ ok: true, id, status: "rejected", already: true });
-        cand.status = "rejected";
-        cand.rejectedAt = Date.now();
-        await savePending(env, pend);
-        return json({ ok: true, id, status: "rejected" });
+        return this._withAdminLock(async () => {
+          const pend = await getPending(env);
+          const cand = pend[id];
+          if (!cand) return json({ error: "not found" }, 404);
+          if (cand.status === "rejected") return json({ ok: true, id, status: "rejected", already: true });
+          cand.status = "rejected";
+          cand.rejectedAt = Date.now();
+          await savePending(env, pend);
+          return json({ ok: true, id, status: "rejected" });
+        });
       }
       // Delete a candidate permanently (pending or rejected).
       if (path === "/api/admin/pending/delete" && request.method === "POST") {
@@ -2614,11 +2683,13 @@ export class TunnelDO {
         let body = {};
         try { body = await request.json(); } catch (e) {}
         const id = (body.id || "").toString();
-        const pend = await getPending(env);
-        if (!pend[id]) return json({ error: "not found" }, 404);
-        delete pend[id];
-        await savePending(env, pend);
-        return json({ ok: true, id });
+        return this._withAdminLock(async () => {
+          const pend = await getPending(env);
+          if (!pend[id]) return json({ error: "not found" }, 404);
+          delete pend[id];
+          await savePending(env, pend);
+          return json({ ok: true, id });
+        });
       }
       // Admin: change password (stored in DO storage, survives deploys)
       if (path === "/api/admin/password" && request.method === "POST") {
