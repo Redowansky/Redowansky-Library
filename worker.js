@@ -539,6 +539,46 @@ async function getExtMovies(env){
 async function saveExtMovies(env, obj){
   await env.DATA_KV.put("ext:movies", JSON.stringify(obj));
 }
+// ---- Approval queue (Phase 1) ----
+// Pending discoveries live in DATA_KV key "ext:pending" — a SEPARATE key
+// from the live catalogue ("ext:movies"). No public route reads it:
+// /api/movies, the homepage, /sitemap.xml and the app feed all read
+// listMovies(), which only merges R2 buckets + ext:movies — so pending
+// and rejected candidates are invisible to visitors by construction.
+// Approval is the only path into the live catalogue.
+async function getPending(env){
+  try { return await env.DATA_KV.get("ext:pending", "json") || {}; } catch(e) { return {}; }
+}
+async function savePending(env, obj){
+  await env.DATA_KV.put("ext:pending", JSON.stringify(obj));
+}
+function normTitle(t){
+  return (t || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+}
+// Duplicate check: TMDB id first, then normalized title (+ year when both
+// sides know it). liveList = array from listMovies() (R2 buckets + ext);
+// pendObj = pending map; excludeId skips one pending id (the candidate
+// itself, on approve). Returns {where, id, title, tmdb} or null.
+function findDuplicate(cand, liveList, pendObj, excludeId){
+  const tmdb = cand.tmdb != null && String(cand.tmdb).trim() !== "" ? String(cand.tmdb) : null;
+  const nt = normTitle(cand.title);
+  const yr = cand.year ? String(cand.year) : "";
+  const matchEntry = (m) => {
+    if (tmdb && m.tmdb != null && String(m.tmdb) === tmdb) return true;
+    if (nt && m.title && normTitle(m.title) === nt) {
+      const my = m.year ? String(m.year) : "";
+      if (!yr || !my || yr === my) return true;
+    }
+    return false;
+  };
+  for (const m of liveList || []) if (matchEntry(m)) return { where: "live", id: m.id || null, title: m.title, tmdb: m.tmdb != null ? m.tmdb : null };
+  for (const id in (pendObj || {})) {
+    if (id === excludeId) continue;
+    const m = pendObj[id];
+    if (matchEntry(m)) return { where: "pending", id, title: m.title, tmdb: m.tmdb != null ? m.tmdb : null };
+  }
+  return null;
+}
 async function tmdbGet(path, apiKey){
   const r = await fetch("https://api.themoviedb.org/3"+path+(path.includes("?")?"&":"?")+"api_key="+apiKey);
   return r.ok ? await r.json() : null;
@@ -613,6 +653,7 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <h2>◈ Library Admin</h2>
 <button data-s="dash" class="on">📊 <span>Dashboard</span></button>
 <button data-s="movies">🎬 <span>Movies</span></button>
+<button data-s="pending">⏳ <span>Approval Queue</span></button>
 <button data-s="settings">⚙️ <span>Settings</span></button>
 </nav>
 <main>
@@ -693,6 +734,34 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <div id="extList" style="margin-top:10px"></div>
 </div>
 <div id="movieList"></div>
+</div>
+<!-- APPROVAL QUEUE -->
+<div class="sec" id="s-pending">
+<h1>⏳ Approval Queue</h1><p class="desc">Discovered titles wait here until you approve them. Pending and rejected entries never appear on the site, in the app feed, or in the sitemap — only approved ones join the live catalogue.</p>
+<div style="background:#0a120c;border:1px solid #1e3a2a;border-radius:12px;padding:14px;margin-bottom:16px">
+<h4 style="margin-bottom:10px">➕ Add a candidate</h4>
+<input id="pendTitle" placeholder="Title *" style="width:100%;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
+<div style="display:flex;gap:8px;margin-top:8px">
+<input id="pendYear" placeholder="Year" style="width:90px;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
+<select id="pendType" style="background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px"><option value="movie">Movie</option><option value="series">TV Series</option></select>
+<input id="pendTmdb" placeholder="TMDB ID (optional — fills poster & info)" style="flex:1;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
+</div>
+<input id="pendPoster" placeholder="Poster URL (optional)" style="width:100%;margin-top:8px;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
+<textarea id="pendOverview" placeholder="Overview (optional)" rows="2" style="width:100%;margin-top:8px;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px"></textarea>
+<div style="display:flex;gap:8px;margin-top:8px">
+<input id="pendSrcLabel" placeholder="Source label" value="Source 1" style="width:110px;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
+<input id="pendSrcUrl" placeholder="Playback source URL (optional)" style="flex:1;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
+</div>
+<div style="display:flex;gap:10px;align-items:center;margin-top:10px">
+<button class="btn" onclick="addPending()">Add to queue</button>
+<span id="pendMsg" style="font-size:.85rem"></span>
+</div>
+</div>
+<div style="display:flex;gap:8px;margin-bottom:12px">
+<button class="btn" id="pendTabP" onclick="pendTab('pending')">⏳ Pending (<span id="pendCountP">0</span>)</button>
+<button class="btn ghost" id="pendTabR" onclick="pendTab('rejected')">✖ Rejected (<span id="pendCountR">0</span>)</button>
+</div>
+<div id="pendList"></div>
 </div>
 <!-- SETTINGS -->
 <div class="sec" id="s-settings">
@@ -878,7 +947,7 @@ async function startR2Upload(){
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(!authed)return;
 document.querySelectorAll("nav button").forEach(x=>x.classList.remove("on"));b.classList.add("on");
 document.querySelectorAll(".sec").forEach(s=>s.classList.remove("on"));$("s-"+b.dataset.s).classList.add("on");
-if(b.dataset.s==="dash")loadDash();if(b.dataset.s==="files")loadFiles();if(b.dataset.s==="movies"){loadMovies();loadIncoming();r2ResumeHint();}});
+if(b.dataset.s==="dash")loadDash();if(b.dataset.s==="files")loadFiles();if(b.dataset.s==="movies"){loadMovies();loadIncoming();r2ResumeHint();}if(b.dataset.s==="pending")loadPending();});
 async function saveTmdbKey(){
   const k=document.getElementById("tmdbKey").value.trim();
   if(!k)return;
@@ -1005,6 +1074,72 @@ async function delExternal(btn){
   const id=btn.dataset.id;
   await api("/api/admin/external?id="+encodeURIComponent(id)+"&pw="+encodeURIComponent(pw()),{method:"DELETE"});
   loadExtList();
+}
+// ---- Approval queue ----
+let pendTabCur="pending", pendCache={pending:[],rejected:[]};
+function pendEsc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+async function loadPending(){
+  const box=document.getElementById("pendList"); if(!box)return;
+  box.innerHTML="<p style='color:#7a9a85'>loading queue…</p>";
+  const r=await api("/api/admin/pending?pw="+encodeURIComponent(pw()));
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){box.innerHTML="<p style='color:#ff9a9a'>Could not load the queue.</p>";return;}
+  pendCache={pending:d.pending||[],rejected:d.rejected||[]};
+  document.getElementById("pendCountP").textContent=pendCache.pending.length;
+  document.getElementById("pendCountR").textContent=pendCache.rejected.length;
+  renderPend();
+}
+function pendTab(t){pendTabCur=t;document.getElementById("pendTabP").className=t==="pending"?"btn":"btn ghost";document.getElementById("pendTabR").className=t==="rejected"?"btn":"btn ghost";renderPend();}
+function renderPend(){
+  const box=document.getElementById("pendList"); if(!box)return;
+  const list=pendCache[pendTabCur]||[];
+  if(!list.length){box.innerHTML="<p style='color:#7a9a85;font-size:.85rem'>"+(pendTabCur==="pending"?"Nothing waiting for approval.":"No rejected candidates.")+"</p>";return;}
+  box.innerHTML=list.map(function(c){
+    const poster=c.poster?("<img src='"+pendEsc(String(c.poster).indexOf("http")===0?c.poster:("https://image.tmdb.org/t/p/w185"+c.poster))+"' style='width:46px;border-radius:6px' onerror='this.remove()'>"):"";
+    const srcs=(c.sources||[]).map(function(s){return "<div style='font-size:.82rem;color:#7a9a85'>🔗 "+pendEsc(s.label||"Source")+" — "+pendEsc(s.url)+"</div>";}).join("");
+    const det="<div id='pd-"+c.id+"' style='display:none;margin-top:8px;padding:10px;background:#060906;border-radius:8px;font-size:.85rem;line-height:1.6'>"
+      +"<div><b>TMDB:</b> "+pendEsc(c.tmdb||"—")+" · <b>Type:</b> "+pendEsc(c.type)+" · <b>Found via:</b> "+pendEsc(c.discoveredVia||"—")+" · "+new Date(c.createdAt||0).toLocaleString()+"</div>"
+      +(c.overview?"<div style='margin-top:6px'>"+pendEsc(c.overview)+"</div>":"")
+      +(srcs||"<div style='color:#7a9a85'>No playback source attached yet — approval needs one.</div>")
+      +(c.note?"<div style='margin-top:6px;color:#7a9a85'>Note: "+pendEsc(c.note)+"</div>":"")
+      +"</div>";
+    const btns=pendTabCur==="pending"
+      ?"<button class='btn' style='padding:6px 14px;font-size:.8rem' data-id='" + c.id + "' onclick='approvePending(this)'>✓ Approve</button><button class='btn' style='padding:6px 14px;font-size:.8rem' data-id='" + c.id + "' onclick='rejectPending(this)'>✖ Reject</button>"
+      :"";
+    return "<div style='padding:10px;background:#0a120c;border:1px solid #1e3a2a;border-radius:10px;margin-bottom:8px'><div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap'>"+poster+"<span style='flex:1;font-size:.95rem;min-width:140px'><b>"+pendEsc(c.title)+"</b> <span style='color:#7a9a85'>"+pendEsc(c.year||"")+" · "+pendEsc(c.type)+(c.tmdb?" · TMDB "+pendEsc(c.tmdb):"")+" · "+(c.sources||[]).length+" source"+((c.sources||[]).length===1?"":"s")+"</span></span><button class='btn ghost' style='padding:6px 12px;font-size:.8rem' data-id='" + c.id + "' onclick='togglePend(this)'>Inspect</button>"+btns+"<button class='btn danger' style='padding:6px 12px;font-size:.8rem' data-id='" + c.id + "' onclick='deletePending(this)'>Delete</button></div>"+det+"</div>";
+  }).join("");
+}
+function togglePend(btn){var e=document.getElementById("pd-"+btn.dataset.id);if(e)e.style.display=e.style.display==="none"?"block":"none";}
+async function addPending(force){
+  const msg=document.getElementById("pendMsg");
+  const title=document.getElementById("pendTitle").value.trim();
+  if(!title){msg.innerHTML='<span class="bad">Title is required</span>';return;}
+  const srcUrl=document.getElementById("pendSrcUrl").value.trim();
+  const body={title,year:document.getElementById("pendYear").value.trim()||null,type:document.getElementById("pendType").value,tmdb:document.getElementById("pendTmdb").value.trim()||null,poster:document.getElementById("pendPoster").value.trim()||null,overview:document.getElementById("pendOverview").value.trim()||null,sources:srcUrl?[{label:document.getElementById("pendSrcLabel").value.trim()||"Source 1",url:srcUrl}]:[]};
+  if(force)body.force=true;
+  msg.textContent="adding…";
+  const r=await api("/api/admin/pending?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const d=await r.json().catch(()=>({}));
+  if(r.ok){msg.innerHTML='<span class="ok">✓ queued: '+pendEsc(d.title)+'</span>';document.getElementById("pendTitle").value="";document.getElementById("pendYear").value="";document.getElementById("pendTmdb").value="";document.getElementById("pendPoster").value="";document.getElementById("pendOverview").value="";document.getElementById("pendSrcUrl").value="";loadPending();return;}
+  if(r.status===409&&d.duplicate){msg.innerHTML='<span class="bad">⚠ Duplicate of '+pendEsc(d.duplicate.title)+' ('+pendEsc(d.duplicate.where)+')</span> <button class="btn" style="padding:4px 12px;font-size:.8rem" onclick="addPending(true)">Add anyway</button>';return;}
+  msg.innerHTML='<span class="bad">✗ '+(d.error||"failed")+'</span>';
+}
+async function approvePending(btn){const id=btn.dataset.id;
+  const r=await api("/api/admin/pending/approve?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});
+  const d=await r.json().catch(()=>({}));
+  if(r.ok){alert("✓ Published: "+(d.title||"")+" — now live at /view/ext/"+d.id);loadPending();return;}
+  if(r.status===409&&d.duplicate){if(confirm("Duplicate of "+(d.duplicate.title||"an existing entry")+" ("+(d.duplicate.where||"")+") — approve anyway?")){const r2=await api("/api/admin/pending/approve?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id,force:true})});const d2=await r2.json().catch(()=>({}));if(r2.ok){alert("✓ Published: "+(d2.title||"")+" — now live at /view/ext/"+d2.id);loadPending();}else alert("✗ "+(d2.error||"failed"));}return;}
+  alert("✗ "+(d.error||"failed"));
+}
+async function rejectPending(btn){const id=btn.dataset.id;
+  if(!confirm("Reject this candidate? It stays in the Rejected list and never appears publicly."))return;
+  const r=await api("/api/admin/pending/reject?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});
+  if(r.ok)loadPending();else alert("✗ failed");
+}
+async function deletePending(btn){const id=btn.dataset.id;
+  if(!confirm("Delete this candidate permanently?"))return;
+  const r=await api("/api/admin/pending/delete?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});
+  if(r.ok)loadPending();else alert("✗ failed");
 }
 // login
 async function login(){const pw=$("pw").value;if(!pw)return;
@@ -2386,6 +2521,104 @@ export class TunnelDO {
         delete extObj[id];
         await saveExtMovies(env, extObj);
         return json({ ok: true });
+      }
+      // ---- Approval queue (Phase 1) ----
+      // List pending + rejected candidates (admin only; nothing here is
+      // reachable from any public route).
+      if (path === "/api/admin/pending" && request.method === "GET") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        const pend = await getPending(env);
+        const all = Object.values(pend).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        return json({ ok: true, pending: all.filter(c => c.status === "pending"), rejected: all.filter(c => c.status === "rejected") });
+      }
+      // Add a candidate to the queue. Duplicate (TMDB id, else title+year)
+      // against the live catalogue AND the queue -> 409 unless force:true.
+      if (path === "/api/admin/pending" && request.method === "POST") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        let body = {};
+        try { body = await request.json(); } catch (e) {}
+        const title = (body.title || "").toString().trim();
+        if (!title) return json({ error: "need title" }, 400);
+        const type = body.type === "series" ? "series" : "movie";
+        const tmdb = body.tmdb != null && String(body.tmdb).trim() !== "" ? body.tmdb : null;
+        // Sources are metadata only ({label, url}) — no video is fetched,
+        // downloaded, or stored by the queue.
+        let srcList = [];
+        if (Array.isArray(body.sources)) for (const s of body.sources) if (s && s.url) srcList.push({ label: (s.label || "Source " + (srcList.length + 1)).slice(0, 30), url: toDirectUrlSrv(s.url) });
+        const apiKey = (env.TMDB_KEY || await this.state.storage.get("tmdb_key"));
+        let meta = { year: body.year ? String(body.year).slice(0, 4) : null, overview: body.overview || null, poster: (body.poster && String(body.poster).startsWith("http")) ? body.poster : null, backdrop: body.backdrop || null, vote: body.vote != null ? body.vote : null, genres: Array.isArray(body.genres) ? body.genres.slice(0, 10) : [] };
+        if (tmdb && apiKey) {
+          const d = await tmdbGet("/" + type + "/" + tmdb, apiKey);
+          if (d) meta = { year: (d.release_date || d.first_air_date || "").slice(0, 4) || meta.year, overview: d.overview || meta.overview, poster: d.poster_path || meta.poster, backdrop: d.backdrop_path || meta.backdrop, vote: d.vote_average != null ? d.vote_average.toFixed(1) : meta.vote, genres: (d.genres || []).map(x => x.name) };
+        }
+        const cand = { id: "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title, type, tmdb, sources: srcList, discoveredVia: (body.discoveredVia || "manual").toString().slice(0, 40), note: (body.note || "").toString().slice(0, 500), status: "pending", createdAt: Date.now(), ...meta };
+        const dup = findDuplicate(cand, await this.listMovies(env), await getPending(env), null);
+        if (dup && !body.force) return json({ error: "duplicate", duplicate: dup }, 409);
+        const pend = await getPending(env);
+        pend[cand.id] = cand;
+        await savePending(env, pend);
+        return json({ ok: true, id: cand.id, title: cand.title, duplicate: dup || null });
+      }
+      // Approve a candidate: publish it into the live catalogue through
+      // the existing ext-entry shape (same fields /api/admin/external
+      // writes, listed immediately — no unlisted flag). Idempotent: if
+      // this candidate was already published, the existing live entry is
+      // returned and nothing is duplicated. Requires >= 1 source, so an
+      // approved entry always has the same shape as today's live entries
+      // (metadata-only catalogue entries are a later phase — the app has
+      // no empty-player state for them yet).
+      if (path === "/api/admin/pending/approve" && request.method === "POST") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        let body = {};
+        try { body = await request.json(); } catch (e) {}
+        const id = (body.id || "").toString();
+        const pend = await getPending(env);
+        const cand = pend[id];
+        if (!cand) {
+          const extObj0 = await getExtMovies(env);
+          for (const k in extObj0) if (extObj0[k].pendingId === id) return json({ ok: true, id: k, title: extObj0[k].title, already: true });
+          return json({ error: "not found" }, 404);
+        }
+        if (cand.status !== "pending") return json({ error: "not pending (status: " + cand.status + ")" }, 400);
+        if (!cand.sources || !cand.sources.length) return json({ error: "need at least one playback source to approve" }, 400);
+        const dup = findDuplicate(cand, await this.listMovies(env), pend, id);
+        if (dup && !body.force) return json({ error: "duplicate", duplicate: dup }, 409);
+        const liveId = "e" + Date.now().toString(36);
+        const extObj = await getExtMovies(env);
+        extObj[liveId] = { id: liveId, pendingId: id, url: cand.sources[0].url, sources: cand.sources, title: cand.title, year: cand.year || null, overview: cand.overview || null, poster: cand.poster || null, backdrop: cand.backdrop || null, vote: cand.vote || null, genres: cand.genres || [], type: cand.type || "movie", tmdb: cand.tmdb || null };
+        await saveExtMovies(env, extObj);
+        delete pend[id];
+        await savePending(env, pend);
+        return json({ ok: true, id: liveId, title: cand.title });
+      }
+      // Reject a candidate: stays in the queue under "rejected", never
+      // appears publicly. Rejected entries can be approved no more —
+      // delete them, or re-add them as a new candidate.
+      if (path === "/api/admin/pending/reject" && request.method === "POST") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        let body = {};
+        try { body = await request.json(); } catch (e) {}
+        const id = (body.id || "").toString();
+        const pend = await getPending(env);
+        const cand = pend[id];
+        if (!cand) return json({ error: "not found" }, 404);
+        if (cand.status === "rejected") return json({ ok: true, id, status: "rejected", already: true });
+        cand.status = "rejected";
+        cand.rejectedAt = Date.now();
+        await savePending(env, pend);
+        return json({ ok: true, id, status: "rejected" });
+      }
+      // Delete a candidate permanently (pending or rejected).
+      if (path === "/api/admin/pending/delete" && request.method === "POST") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        let body = {};
+        try { body = await request.json(); } catch (e) {}
+        const id = (body.id || "").toString();
+        const pend = await getPending(env);
+        if (!pend[id]) return json({ error: "not found" }, 404);
+        delete pend[id];
+        await savePending(env, pend);
+        return json({ ok: true, id });
       }
       // Admin: change password (stored in DO storage, survives deploys)
       if (path === "/api/admin/password" && request.method === "POST") {
