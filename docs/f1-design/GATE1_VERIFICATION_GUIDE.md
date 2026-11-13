@@ -92,9 +92,26 @@ into any file.**
 
 ```bash
 curl -s -H "Authorization: Bearer $CF_API_TOKEN" \
-  "https://api.cloudflare.com/client/v4/accounts/676d7eaee0bab349422d3c91c9690679/workers/durable_objects/namespaces" \
+  "https://api.cloudflare.com/client/v4/accounts/676d7eaee0bab349422d3c91c9690679/workers/durable_objects/namespaces?per_page=1000" \
   | python3 -m json.tool
 ```
+
+**Pagination — check it explicitly.** The API returns 20 namespaces
+per page by default, so a namespace can be overlooked in a larger
+list if you only read the first page. The schema allows
+`per_page` up to **1000** (verified against the official API
+reference, 2026-11-13), so request `?per_page=1000`. Then, before
+concluding anything, read **`result_info`** in the response
+(`total_count`, `total_pages`, `page`, `per_page`):
+- If `total_pages` is 1, you have the whole list.
+- If `total_pages` is greater than 1, fetch each subsequent page
+  (`?page=2&per_page=1000`, `?page=3&per_page=1000`, …) and search
+  each one, until the TunnelDO / sia-lab entry is found or all pages
+  are exhausted.
+- Only conclude the entry is absent after **all** pages are checked.
+  (This account is expected to have very few namespaces, so one page
+  will almost certainly suffice — but check `result_info` rather than
+  assuming it.)
 
 **How to read the result:** the response is a list of namespaces.
 Find the entry where `class == "TunnelDO"` and `script == "sia-lab"`.
@@ -104,9 +121,18 @@ use_sqlite? }`).
 
 - **`use_sqlite: true` → SQLite-backed. (Definitive.)**
 - **`use_sqlite: false` → legacy KV-backed. (Definitive.)**
+- **`use_sqlite` absent or `null` → INCONCLUSIVE.** The field is
+  **optional** in the official API schema (`use_sqlite : optional
+  boolean`, verified 2026-11-13). A missing or null field is not
+  evidence for either backend. **Never interpret a missing field as
+  `false`, and never automatically classify it as legacy KV-backed.**
+  If the field is absent or null, record the backend as INCONCLUSIVE
+  and use the dashboard evidence (Method A) or the staging-DO probe
+  fallback (Method C, needs gate 5 approval) instead.
 
-Record the namespace `id` (UUID) and the exact `use_sqlite` value.
-That is the evidence for the decision record.
+Record the namespace `id` (UUID), the exact `use_sqlite` value (or
+"absent/null"), and the pagination check (`result_info.total_pages`
+and the pages checked). That is the evidence for the decision record.
 
 ## Method C — Runtime probe (NOT available now; do not attempt)
 
@@ -146,9 +172,11 @@ separate approval (gate 5) — not an improvised production change.
 | | Status |
 |---|---|
 | `use_sqlite: true/false` from the API for the TunnelDO / sia-lab namespace | **Confirmed** (direct, authoritative) |
+| `use_sqlite` absent or `null` in the API response | **Inconclusive** — the field is optional in the schema; a missing field is not evidence for either backend. Never interpret it as `false` / legacy KV-backed. |
 | "Total storage" chart present in the dashboard for this namespace | **Confirmed** (documented to appear only for SQLite-backed namespaces) |
 | "Total storage" chart absent | **Suggestive only** — points toward legacy, but not conclusive; confirm with Method B |
 | Class/object names, code style, account plan, "probably SQLite" | **Assumption, not evidence** |
+| The TunnelDO / sia-lab entry not found in the API list | **Inconclusive until all pages are checked** — verify `result_info.total_pages` and fetch every page (`per_page=1000`) before concluding it is absent |
 
 Record the evidence level for whatever you find: `confirmed (API
 use_sqlite)`, `confirmed (dashboard Total storage chart present)`, or
@@ -233,6 +261,10 @@ use_sqlite)`, `confirmed (dashboard Total storage chart present)`, or
   `GET /accounts/{account_id}/workers/durable_objects/namespaces`,
   `Namespace { id, class, name, script?, use_sqlite? }`.
   (developers.cloudflare.com/api/resources/durable_objects/subresources/namespaces/methods/list/)
+  Verified 2026-11-13: `use_sqlite` is **optional** (`use_sqlite :
+  optional boolean`); `per_page` accepts up to **1000** (default 20);
+  `result_info` carries `count`, `page`, `per_page`, `total_count`,
+  `total_pages`.
 - Cloudflare docs — "Durable Object class exports": storage is
   `"sqlite"` or `"legacy-kv"`; immutable once a namespace exists;
   `storage_type_mismatch` on a switch.

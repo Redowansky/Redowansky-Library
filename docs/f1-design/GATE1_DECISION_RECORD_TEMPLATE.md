@@ -25,8 +25,10 @@ code is recorded in this record — ever.**
 
 - **Dashboard — "Total storage" chart:** present / absent
   (Exact label seen, if any other storage label is shown:)
-- **API — `use_sqlite` value:** true / false / not run
+- **API — `use_sqlite` value:** true / false / absent-or-null (INCONCLUSIVE — never interpret a missing field as `false` / legacy) / not run
   (Quote the field exactly as returned for the TunnelDO / sia-lab entry.)
+- **API — pagination:** `per_page` used: ___ ; `result_info.total_pages`: ___ ; pages checked: ___ ; entry found on page: ___
+  (All pages must be checked before concluding the entry is absent.)
 - **Screenshot:** (file name / link — crop out any token or key if visible)
 
 ## Conclusion
