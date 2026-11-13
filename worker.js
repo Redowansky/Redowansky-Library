@@ -599,6 +599,17 @@ async function getDiscoveryStateStrict(env){
 async function saveDiscoveryState(env, obj){
   await env.DATA_KV.put("ext:discovery:state", JSON.stringify(obj));
 }
+
+// ---- Catalogue freeze (F1 migration prerequisite) ----
+// The flag lives in DO storage (same pattern as admin_pw/tmdb_key),
+// NOT in KV. While set, every catalogue write route returns 503.
+// Reads are unaffected. Returns the 503 Response if frozen, null
+// otherwise. THROWS if the flag itself cannot be read (fail-closed:
+// a storage failure must abort the write with 500, never proceed).
+async function freezeBlock(state){
+  const frozen = state && state.storage ? await state.storage.get("catalogue_frozen") : false;
+  return frozen ? json({ error: "catalogue frozen for migration \— try again later" }, 503) : null;
+}
 // Idempotent recovery for partial-write failures (review 2026-11-13).
 // A discovery run persists three separate KV keys (queue, seen, state),
 // not a transaction. If the queue write lands but the seen write fails,
@@ -2645,6 +2656,7 @@ export class TunnelDO {
         }
         try {
           return await this._withAdminLock(async () => {
+          const fb = await freezeBlock(this.state); if (fb) return fb;
           const id = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
           const extObj = await getExtMoviesStrict(env);
           extObj[id] = { id, url: video_url, sources: srcList, ...meta };
@@ -2661,6 +2673,7 @@ export class TunnelDO {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         const { id, poster } = await request.json();
         return this._withAdminLock(async () => {
+          const fb = await freezeBlock(this.state); if (fb) return fb;
           const extObj = await getExtMovies(env);
           if (!extObj[id]) return json({ error: "not found" }, 404);
           extObj[id].poster = cleanImgUrl(poster);
@@ -2675,6 +2688,7 @@ export class TunnelDO {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         const { id, unlisted } = await request.json();
         return this._withAdminLock(async () => {
+          const fb = await freezeBlock(this.state); if (fb) return fb;
           const extObj = await getExtMovies(env);
           if (!extObj[id]) return json({ error: "not found" }, 404);
           extObj[id].unlisted = !!unlisted;
@@ -2686,6 +2700,7 @@ export class TunnelDO {
       if (path === "/api/admin/ytinfo" && request.method === "POST") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         return this._withAdminLock(async () => {
+        const fb = await freezeBlock(this.state); if (fb) return fb;
         const { id, url: yturl } = await request.json();
         const extObj = await getExtMovies(env);
         if (!extObj[id]) return json({ error: "not found" }, 404);
@@ -2710,6 +2725,7 @@ export class TunnelDO {
         const id = url.searchParams.get("id");
         try {
           return await this._withAdminLock(async () => {
+          const fb = await freezeBlock(this.state); if (fb) return fb;
           const extObj = await getExtMoviesStrict(env);
           delete extObj[id];
           await saveExtMovies(env, extObj);
@@ -2779,6 +2795,7 @@ export class TunnelDO {
         const id = (body.id || "").toString();
         try {
           return await this._withAdminLock(async () => {
+          const fb = await freezeBlock(this.state); if (fb) return fb;
           const pend = await getPendingStrict(env);
           const cand = pend[id];
           if (!cand) {
@@ -2954,6 +2971,56 @@ export class TunnelDO {
         } catch (e) {
           if (e && e.code === "KV_READ_FAILED") return json({ error: "stored data temporarily unreadable — try again" }, 500);
           return json({ error: "operation failed — try again" }, 500);
+        }
+      }
+      // Admin: catalogue freeze (F1 migration prerequisite). The flag
+      // lives in DO storage (same pattern as admin_pw/tmdb_key). While
+      // set, every catalogue write route returns 503. Reads are
+      // unaffected. The flag is a PERMANENT feature (it also gates the
+      // one-time migration endpoint below).
+      if (path === "/api/admin/catalogue-freeze" && request.method === "GET") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        let frozen = false;
+        try { frozen = !!(await this.state.storage.get("catalogue_frozen")); } catch (e) { return json({ error: "stored data temporarily unreadable \— try again" }, 500); }
+        return json({ ok: true, frozen });
+      }
+      if (path === "/api/admin/catalogue-freeze" && request.method === "POST") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        let body = {};
+        try { body = await request.json(); } catch (e) {}
+        const frozen = body.frozen === true;
+        try { await this.state.storage.put("catalogue_frozen", frozen); } catch (e) { return json({ error: "operation failed \— try again" }, 500); }
+        return json({ ok: true, frozen });
+      }
+      // Admin: one-time catalogue migration (KV -> DO storage).
+      // PROTECTED and UNEXECUTED until separately approved: it requires
+      // the catalogue to be frozen (so the KV source is stable) and
+      // refuses if DO storage already holds a catalogue (one-time only).
+      // It reads the KV catalogue strictly, copies it into DO storage,
+      // reads it back, and verifies entry count + SHA-256. It does NOT
+      // switch any read path (the F1 code reads DO storage; this
+      // endpoint only seeds it). The KV key is left in place as a backup.
+      if (path === "/api/admin/catalogue-migrate" && request.method === "POST") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        try {
+          return await this._withAdminLock(async () => {
+          const frozen = await this.state.storage.get("catalogue_frozen");
+          if (!frozen) return json({ error: "catalogue must be frozen before migration" }, 400);
+          const existing = await this.state.storage.get("ext:movies");
+          if (existing != null) return json({ error: "catalogue already migrated" }, 409);
+          const kvCat = await getExtMoviesStrict(env);
+          const count = Object.keys(kvCat).length;
+          const hash = await sha256Hex(te.encode(JSON.stringify(kvCat)));
+          await this.state.storage.put("ext:movies", kvCat);
+          const back = await this.state.storage.get("ext:movies");
+          const backCount = back ? Object.keys(back).length : -1;
+          const backHash = back ? await sha256Hex(te.encode(JSON.stringify(back))) : "";
+          if (backCount !== count || backHash !== hash) return json({ error: "migration verification failed", count, sha256: hash, backCount, backHash }, 500);
+          return json({ ok: true, count, sha256: hash, verified: true });
+          });
+        } catch (e) {
+          if (e && e.code === "KV_READ_FAILED") return json({ error: "stored data temporarily unreadable \— try again" }, 500);
+          return json({ error: "operation failed \— try again" }, 500);
         }
       }
       // Admin: change password (stored in DO storage, survives deploys)

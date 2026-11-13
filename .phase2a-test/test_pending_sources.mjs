@@ -15,6 +15,7 @@
 // worker.mjs is regenerated from worker.js (see test_phase2a.mjs header).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { TunnelDO } from "./worker.mjs";
 
 function makeKV(initial = {}) {
@@ -27,12 +28,19 @@ function makeKV(initial = {}) {
 }
 function makeDO({ kv, tmdbKey = "FAKEKEY", live = null, slowKey = false, realList = false } = {}) {
   const env = { DATA_KV: kv, TMDB_KEY: undefined, DISCOVERY_CRON_SECRET: "cronsecret", S3_ACCESS_KEY: "x", S3_SECRET_KEY: "y" };
+  // DO storage stub: a real backing Map (the freeze flag and, after F1,
+  // the catalogue live here). Seeded with the two keys the worker reads
+  // directly (tmdb_key, admin_pw); everything else starts absent.
+  // _map exposes the store for assertions (frozen flag, migrated catalogue).
+  const store = new Map([["tmdb_key", tmdbKey], ["admin_pw", "pw123"]]);
   const state = { storage: {
     get: async (k) => {
       if (slowKey) await new Promise((r) => setTimeout(r, 5));
-      return k === "tmdb_key" ? tmdbKey : k === "admin_pw" ? "pw123" : null;
+      return store.has(k) ? store.get(k) : null;
     },
-    put: async () => {},
+    put: async (k, v) => { store.set(k, v); },
+    delete: async (k) => { store.delete(k); },
+    _map: store,
   } };
   const d = new TunnelDO(state, env);
   // realList: keep the production listMovies() (bucket listing via a stubbed
@@ -45,6 +53,14 @@ async function kvObj(kv, key) { return JSON.parse(kv._map.get(key) || "{}"); }
 const PW = "?pw=pw123";
 async function call(d, path, body) {
   const res = await d.fetch(new Request("https://internal" + path + PW, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) }));
+  return { status: res.status, body: await res.json().catch(() => ({})) };
+}
+async function callGet(d, path) {
+  const res = await d.fetch(new Request("https://internal" + path + PW, { method: "GET" }));
+  return { status: res.status, body: await res.json().catch(() => ({})) };
+}
+async function callNoPw(d, path, body, method = "POST") {
+  const res = await d.fetch(new Request("https://internal" + path, { method, headers: { "Content-Type": "application/json" }, body: method === "GET" ? undefined : JSON.stringify(body || {}) }));
   return { status: res.status, body: await res.json().catch(() => ({})) };
 }
 function seedCand(over = {}) {
@@ -1007,4 +1023,132 @@ test("R32 approve with failing initial queue read: 500, nothing published", asyn
   assert.ok(!String(rF.body.error || "").includes("kv get boom"), "no raw KV error text to clients");
   assert.equal(kvF._map.get("ext:pending"), beforePend, "queue byte-identical");
   assert.equal(kvF._map.get("ext:movies"), beforeMovies, "catalogue byte-identical");
+});
+
+// ---- Catalogue freeze (F1 migration prerequisite, Rev 4.1 §3) ----
+// FZ1–FZ3: the freeze flag blocks all six catalogue-write routes with
+// 503 and no write; clearing the flag restores normal writes; the
+// flag endpoints round-trip and are password-gated. FZ4: the one-time
+// migration endpoint (Phase 1 report §5.3) is protected and verified.
+const FROZEN_MSG = "catalogue frozen for migration — try again later";
+
+test("FZ1 freeze blocks all six catalogue-write routes with 503, no write", async () => {
+  const live11 = seedLive11();
+  const kv = makeKV({
+    "ext:movies": live11,
+    "ext:pending": { "p-1": { id: "p-1", title: "New Film", type: "movie", tmdb: 2001, year: "2026", sources: [{ label: "S1", url: "https://example.com/play/2001" }], status: "pending", createdAt: 1 } },
+    "ext:discovery:seen": {},
+    "ext:discovery:state": {},
+  });
+  const d = makeDO({ kv, live: liveListOf(live11) });
+  const beforeMovies = kv._map.get("ext:movies");
+  const beforePend = kv._map.get("ext:pending");
+  const set = await call(d, "/api/admin/catalogue-freeze", { frozen: true });
+  assert.equal(set.status, 200, "setting the freeze must succeed");
+  assert.equal(set.body.frozen, true);
+  const get = await callGet(d, "/api/admin/catalogue-freeze");
+  assert.equal(get.status, 200);
+  assert.equal(get.body.frozen, true, "the flag reads back as set");
+  // 1. direct publish (still a live write in the freeze commit; F1 converts it).
+  const r1 = await call(d, "/api/admin/external", { video_url: "https://example.com/v.mp4", title: "Direct Film", type: "movie" });
+  assert.equal(r1.status, 503, "external POST must be blocked while frozen");
+  assert.equal(r1.body.error, FROZEN_MSG);
+  // 2. poster write.
+  const r2 = await call(d, "/api/admin/extposter", { id: "emv1", poster: "https://example.com/p.jpg" });
+  assert.equal(r2.status, 503, "extposter must be blocked while frozen");
+  assert.equal(r2.body.error, FROZEN_MSG);
+  // 3. publish/unpublish flip.
+  const r3 = await call(d, "/api/admin/extpublish", { id: "emv1", unlisted: true });
+  assert.equal(r3.status, 503, "extpublish must be blocked while frozen");
+  assert.equal(r3.body.error, FROZEN_MSG);
+  // 4. YouTube info write (blocked before any oEmbed fetch).
+  const r4 = await call(d, "/api/admin/ytinfo", { id: "emv1", url: "https://www.youtube.com/watch?v=abc123" });
+  assert.equal(r4.status, 503, "ytinfo must be blocked while frozen");
+  assert.equal(r4.body.error, FROZEN_MSG);
+  // 5. delete.
+  const res5 = await d.fetch(new Request("https://internal/api/admin/external?pw=pw123&id=emv3", { method: "DELETE" }));
+  assert.equal(res5.status, 503, "DELETE external must be blocked while frozen");
+  assert.equal((await res5.json().catch(() => ({}))).error, FROZEN_MSG);
+  // 6. approve.
+  const r6 = await call(d, "/api/admin/pending/approve", { id: "p-1" });
+  assert.equal(r6.status, 503, "approve must be blocked while frozen");
+  assert.equal(r6.body.error, FROZEN_MSG);
+  // Nothing was written anywhere.
+  assert.equal(kv._map.get("ext:movies"), beforeMovies, "catalogue byte-identical while frozen");
+  assert.equal(kv._map.get("ext:pending"), beforePend, "queue byte-identical while frozen");
+  assert.equal(Object.keys(await kvObj(kv, "ext:movies")).length, 11);
+  assert.equal(Object.keys(await kvObj(kv, "ext:pending")).length, 1);
+});
+
+test("FZ2 flag clear restores normal catalogue writes", async () => {
+  const live11 = seedLive11();
+  const kv = makeKV({ "ext:movies": live11, "ext:pending": {}, "ext:discovery:seen": {}, "ext:discovery:state": {} });
+  const d = makeDO({ kv, live: liveListOf(live11) });
+  const set = await call(d, "/api/admin/catalogue-freeze", { frozen: true });
+  assert.equal(set.status, 200);
+  const blocked = await call(d, "/api/admin/extpublish", { id: "emv1", unlisted: true });
+  assert.equal(blocked.status, 503, "frozen: extpublish blocked");
+  const clear = await call(d, "/api/admin/catalogue-freeze", { frozen: false });
+  assert.equal(clear.status, 200, "clearing the freeze must succeed");
+  assert.equal(clear.body.frozen, false);
+  const get = await callGet(d, "/api/admin/catalogue-freeze");
+  assert.equal(get.body.frozen, false, "the flag reads back as clear");
+  const ok = await call(d, "/api/admin/extpublish", { id: "emv1", unlisted: true });
+  assert.equal(ok.status, 200, "unfrozen: extpublish works again");
+  const ext = await kvObj(kv, "ext:movies");
+  assert.equal(ext["emv1"].unlisted, true, "the write landed after the flag cleared");
+});
+
+test("FZ3 freeze endpoints round-trip and are password-gated", async () => {
+  const kv = makeKV({ "ext:movies": {}, "ext:pending": {}, "ext:discovery:seen": {}, "ext:discovery:state": {} });
+  const d = makeDO({ kv });
+  const noPwGet = await callNoPw(d, "/api/admin/catalogue-freeze", null, "GET");
+  assert.equal(noPwGet.status, 403, "GET freeze without a password must be 403");
+  const noPwPost = await callNoPw(d, "/api/admin/catalogue-freeze", { frozen: true });
+  assert.equal(noPwPost.status, 403, "POST freeze without a password must be 403");
+  const set = await call(d, "/api/admin/catalogue-freeze", { frozen: true });
+  assert.equal(set.status, 200);
+  assert.equal(set.body.frozen, true);
+  const get1 = await callGet(d, "/api/admin/catalogue-freeze");
+  assert.equal(get1.body.frozen, true, "set true round-trips");
+  const clear = await call(d, "/api/admin/catalogue-freeze", { frozen: false });
+  assert.equal(clear.body.frozen, false);
+  const get2 = await callGet(d, "/api/admin/catalogue-freeze");
+  assert.equal(get2.body.frozen, false, "set false round-trips");
+  // A body without frozen:true clears the flag (frozen === true check).
+  await call(d, "/api/admin/catalogue-freeze", { frozen: true });
+  const noField = await call(d, "/api/admin/catalogue-freeze", {});
+  assert.equal(noField.body.frozen, false, "a body without frozen:true clears the flag");
+});
+
+test("FZ4 migration endpoint is protected and verifies the seed", async () => {
+  const live11 = seedLive11();
+  const kv = makeKV({ "ext:movies": live11, "ext:pending": {}, "ext:discovery:seen": {}, "ext:discovery:state": {} });
+  const d = makeDO({ kv, live: liveListOf(live11) });
+  const beforeMovies = kv._map.get("ext:movies");
+  // (a) Not frozen yet: refused.
+  const notFrozen = await call(d, "/api/admin/catalogue-migrate", {});
+  assert.equal(notFrozen.status, 400, "migration without the freeze must be refused");
+  assert.equal(notFrozen.body.error, "catalogue must be frozen before migration");
+  assert.equal(d.state.storage._map.get("ext:movies"), undefined, "nothing seeded on the refused call");
+  // (b) No password: 403.
+  const noPw = await callNoPw(d, "/api/admin/catalogue-migrate", {});
+  assert.equal(noPw.status, 403, "migration without a password must be 403");
+  // (c) Frozen: the seed runs and verifies.
+  const set = await call(d, "/api/admin/catalogue-freeze", { frozen: true });
+  assert.equal(set.status, 200);
+  const expectedHash = createHash("sha256").update(JSON.stringify(live11)).digest("hex");
+  const mig = await call(d, "/api/admin/catalogue-migrate", {});
+  assert.equal(mig.status, 200, "a frozen, unseeded migration must succeed");
+  assert.equal(mig.body.ok, true);
+  assert.equal(mig.body.count, 11);
+  assert.equal(mig.body.sha256, expectedHash, "the returned hash matches the KV source");
+  assert.equal(mig.body.verified, true);
+  assert.deepEqual(d.state.storage._map.get("ext:movies"), live11, "DO storage now holds the catalogue");
+  assert.equal(kv._map.get("ext:movies"), beforeMovies, "the KV source is left in place as a backup");
+  // (d) Already seeded: refused (one-time only).
+  const again = await call(d, "/api/admin/catalogue-migrate", {});
+  assert.equal(again.status, 409, "a second migration must be refused");
+  assert.equal(again.body.error, "catalogue already migrated");
+  assert.deepEqual(d.state.storage._map.get("ext:movies"), live11, "the second call changed nothing");
 });
