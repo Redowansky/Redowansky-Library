@@ -1908,12 +1908,14 @@ export class TunnelDO {
     const started = Date.now();
     const runAt = new Date(started).toISOString();
     const counts = { fetched: 0, newCandidates: 0, duplicates: 0, skipped: 0, failed: 0, bySource: {} };
-    // Overlap guard (hardening 2026-11-13): the flag is set synchronously
-    // BEFORE the first await, so two invocations arriving together cannot
-    // both pass the check (the old code checked it before the async
-    // TMDB-key read, leaving a gap). Every early return clears it.
+    // Overlap guard (hardening 2026-11-13, flag cleanup fixed 2026-11-13):
+    // the flag is set synchronously BEFORE the first await, so two
+    // invocations arriving together cannot both pass the check. The
+    // try/finally below guarantees the flag is always reset, even if
+    // the state read or the TMDB-key read throws.
     if (this._discoveryRunning) return { at: runAt, trigger, status: "skipped", counts, durationMs: 0, error: "a run is already in progress" };
     this._discoveryRunning = true;
+    try {
     const state = await getDiscoveryState(env);
     const finish = async (status, error) => {
       state.lastRun = { at: runAt, trigger, status, counts, durationMs: Date.now() - started, error: error || null };
@@ -1923,11 +1925,11 @@ export class TunnelDO {
       return state.lastRun;
     };
     if (trigger === "cron") {
-      if (!state.enabled) { this._discoveryRunning = false; return { at: runAt, trigger, status: "skipped", counts, durationMs: 0, error: "discovery disabled" }; }
-      if (state.nextRunAt && started < Date.parse(state.nextRunAt)) { this._discoveryRunning = false; return { at: runAt, trigger, status: "skipped", counts, durationMs: 0, error: "not due yet" }; }
+      if (!state.enabled) return { at: runAt, trigger, status: "skipped", counts, durationMs: 0, error: "discovery disabled" };
+      if (state.nextRunAt && started < Date.parse(state.nextRunAt)) return { at: runAt, trigger, status: "skipped", counts, durationMs: 0, error: "not due yet" };
     }
     const apiKey = (env.TMDB_KEY || await this.state.storage.get("tmdb_key"));
-    if (!apiKey) { const r = await finish("failed", "no TMDB key"); this._discoveryRunning = false; return r; }
+    if (!apiKey) return finish("failed", "no TMDB key");
     try {
       const ymd = (d) => d.toISOString().slice(0, 10);
       const lastDate = state.lastRun && state.lastRun.at ? state.lastRun.at.slice(0, 10) : ymd(new Date(started - 7 * 864e5));
@@ -2035,6 +2037,20 @@ export class TunnelDO {
       return finish("ok", null);
     } catch (e) {
       return finish("failed", String((e && e.message) || e));
+    }
+    } catch (e) {
+      // Setup failure (state read / TMDB-key read threw, or finish()
+      // threw while saving): record a failed run if state is reachable,
+      // otherwise return the failure inline. Queue/seen/totals untouched.
+      try {
+        const s2 = await getDiscoveryState(env);
+        s2.lastRun = { at: runAt, trigger, status: "failed", counts, durationMs: Date.now() - started, error: String((e && e.message) || e) };
+        s2.nextRunAt = nextRunAtFor(s2.frequency, started);
+        await saveDiscoveryState(env, s2);
+        return s2.lastRun;
+      } catch (e2) {
+        return { at: runAt, trigger, status: "failed", counts, durationMs: Date.now() - started, error: String((e && e.message) || e) };
+      }
     } finally {
       this._discoveryRunning = false;
     }

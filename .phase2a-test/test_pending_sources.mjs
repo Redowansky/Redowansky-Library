@@ -203,6 +203,64 @@ test("T11 max 5 sources, duplicate URLs deduped", async () => {
   assert.equal(dup.body.sources.length, 1);
 });
 
+// Flag cleanup regression (review 2026-11-13 item 1): the TMDB-key
+// lookup throws on the first call, then works. The first run must fail
+// WITHOUT sticking the flag, so the second run proceeds normally.
+test("flag reset when the TMDB-key lookup throws", async () => {
+  const kv = makeKV({});
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    const ok = (obj) => ({ ok: true, status: 200, json: async () => obj });
+    if (u.includes("/discover/movie")) return ok({ results: [{ id: 1001, popularity: 5 }] });
+    if (u.includes("/discover/tv")) return ok({ results: [] });
+    if (u.includes("/trending/movie")) return ok({ results: [] });
+    if (u.includes("/trending/tv")) return ok({ results: [] });
+    if (u.includes("/watch/providers")) return ok({ results: {} });
+    const m = u.match(/\/(movie|tv)\/(\d+)\?/);
+    if (m) return ok({ id: 1001, title: "T1001", release_date: "2026-11-12", overview: "", poster_path: null, backdrop_path: null, vote_average: 7, genres: [] });
+    return ok({});
+  };
+  let keyCalls = 0;
+  const env = { DATA_KV: kv, TMDB_KEY: undefined, DISCOVERY_CRON_SECRET: "cronsecret", S3_ACCESS_KEY: "x", S3_SECRET_KEY: "y" };
+  const state = { storage: {
+    get: async (k) => {
+      if (k === "tmdb_key") { keyCalls++; if (keyCalls === 1) throw new Error("storage boom"); return "FAKEKEY"; }
+      return k === "admin_pw" ? "pw123" : null;
+    },
+    put: async () => {},
+  } };
+  const d = new TunnelDO(state, env);
+  d.listMovies = async () => [];
+  const run1 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run1.status, "failed");
+  assert.match(run1.error, /storage boom/);
+  let st = await kvObj(kv, "ext:discovery:state");
+  assert.equal(st.lastRun.status, "failed");
+  assert.equal(st.totals.discovered, 0); // nothing filed by the failed run
+  const run2 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run2.status, "ok"); // flag was reset — otherwise "skipped"
+  assert.equal(run2.counts.newCandidates, 1);
+  const pend = await kvObj(kv, "ext:pending");
+  assert.equal(Object.keys(pend).length, 1);
+});
+
+// Second case: the state read itself throws once. getDiscoveryState
+// swallows KV errors and returns defaults by design (fail-open), so the
+// run proceeds with defaults — the point here is the flag still resets
+// and both runs complete instead of the second one reporting "skipped".
+test("state read failure does not stick the flag either", async () => {
+  const kv = makeKV({});
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ results: [] }) });
+  let threw = false;
+  const origGet = kv.get.bind(kv);
+  kv.get = async (k, fmt) => { if (k === "ext:discovery:state" && !threw) { threw = true; throw new Error("kv boom"); } return origGet(k, fmt); };
+  const d = makeDO({ kv });
+  const run1 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run1.status, "ok"); // fail-open to defaults, not a stuck flag
+  const run2 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run2.status, "ok"); // flag was reset — otherwise "skipped"
+});
+
 // lastSuccess: recorded on ok runs only, survives a later failed run
 test("lastSuccess recorded on ok, kept after a failed run", async () => {
   const kv = makeKV({});
