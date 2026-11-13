@@ -8,9 +8,10 @@
 //     exercises the new discovery JS (provLine, renderDiscovery,
 //     renderPend with a needsSource + providers candidate).
 const fs = require("fs");
+const path = require("path");
 const { execSync } = require("child_process");
 
-const src = fs.readFileSync("/home/hatch/workspace/sia-lab/worker.js", "utf8");
+const src = fs.readFileSync(path.join(__dirname, "worker.js"), "utf8");
 
 function extractTemplate(name) {
   const anchor = "const " + name + " = `";
@@ -35,8 +36,8 @@ function checkScripts(pageName, body) {
   const scripts = [...served.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
   console.log(pageName + ": " + scripts.length + " <script> block(s), interpolations blanked: " + JSON.stringify([...new Set(interp)]));
   scripts.forEach((s, idx) => {
-    const f = "/home/hatch/workspace/sia-lab/.phase2a-test/" + pageName + "-script" + idx + ".js";
-    fs.mkdirSync("/home/hatch/workspace/sia-lab/.phase2a-test", { recursive: true });
+    const f = path.join(__dirname, ".phase2a-test", pageName + "-script" + idx + ".js");
+    fs.mkdirSync(path.join(__dirname, ".phase2a-test"), { recursive: true });
     fs.writeFileSync(f, s);
     execSync("node --check " + f, { stdio: "inherit" });
     console.log("  script " + idx + " node --check OK (" + s.length + " chars)");
