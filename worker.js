@@ -603,8 +603,19 @@ async function getExtMoviesStrict(store){
 // longer lives in KV; this helper reads the pre-migration KV value so
 // the migration endpoint can copy it into DO storage.
 async function getExtMoviesKVStrict(env){
-  try { return await env.DATA_KV.get("ext:movies", "json") || {}; }
+  let v;
+  try { v = await env.DATA_KV.get("ext:movies", "json"); }
   catch (e) { e.code = "KV_READ_FAILED"; throw e; }
+  // Fail closed (correction pass 2026-11-14): a missing KV source is
+  // NOT an empty catalogue — the old `|| {}` let migration seed an
+  // empty DO catalogue from nothing. A missing key, or a present value
+  // that is not a catalogue object, is a hard migration failure. The
+  // ONLY empty source that may migrate is an explicitly stored {} (a
+  // present value); the Rev 4.1 backup reconciliation still has to
+  // agree with it before any production run.
+  if (v == null) { const e = new Error("migration source missing"); e.code = "KV_SOURCE_MISSING"; throw e; }
+  if (typeof v !== "object" || Array.isArray(v)) { const e = new Error("migration source malformed"); e.code = "KV_SOURCE_MALFORMED"; throw e; }
+  return v;
 }
 // True for every catalogue-read failure the routes treat as "stored
 // data temporarily unreadable": a KV read failure (migration endpoint,
@@ -2079,16 +2090,20 @@ export class TunnelDO {
       }
     }
     // External movies (linked, not hosted) - from DO storage (strongly
-    // consistent; survives deploys). A missing catalogue is a hard
-    // failure, never an empty list: the public feed must fail closed
-    // rather than silently drop the catalogue.
-    try {
-      const extObj = opts.strictExt ? await getExtMoviesStrict(this.state.storage) : await getExtMovies(this.state.storage);
-      // unlisted entries stay reachable via their direct /view/ext/<id>
-      // URL (used to verify embed players) but are kept out of the home
-      // catalog and the app feed until explicitly published.
-      for (const id in extObj) { if (extObj[id].unlisted) continue; movies.push({ ...extObj[id], external: true }); }
-    } catch (e) { if (opts.strictExt || e.code === "CATALOGUE_NOT_SEEDED") throw e; }
+    // consistent; survives deploys). The read is STRICT in every
+    // listMovies path — public feed, sitemap, admin dup checks alike:
+    // a missing or unreadable catalogue is a hard failure, never an
+    // empty list (correction pass 2026-11-14: the old swallowing read
+    // silently dropped the whole external catalogue on a transient
+    // storage failure, and the catch only rethrew CATALOGUE_NOT_SEEDED).
+    // A legitimately empty catalogue is stored as {} (present) and
+    // still lists as empty. opts.strictExt is retained for the existing
+    // admin callers but no longer changes behaviour.
+    const extObj = await getExtMoviesStrict(this.state.storage);
+    // unlisted entries stay reachable via their direct /view/ext/<id>
+    // URL (used to verify embed players) but are kept out of the home
+    // catalog and the app feed until explicitly published.
+    for (const id in extObj) { if (extObj[id].unlisted) continue; movies.push({ ...extObj[id], external: true }); }
     return movies;
   }
 
@@ -3246,8 +3261,15 @@ export class TunnelDO {
         let body = {};
         try { body = await request.json(); } catch (e) {}
         const frozen = body.frozen === true;
-        try { await this.state.storage.put("catalogue_frozen", frozen); } catch (e) { return json({ error: "operation failed — try again" }, 500); }
-        return json({ ok: true, frozen });
+        // Serialized through the same _withAdminLock as the catalogue
+        // writers (correction pass 2026-11-14): the old direct put let
+        // a writer pass its freeze check and still be mid-write when
+        // the freeze returned, so the response guaranteed no barrier.
+        // Now an in-flight writer completes before this put runs, and
+        // every later writer observes the flag in its freeze check.
+        // This route is never called from inside a lock callback, so
+        // there is no deadlock.
+        try { return await this._withAdminLock(async () => { await this.state.storage.put("catalogue_frozen", frozen); return json({ ok: true, frozen }); }); } catch (e) { return json({ error: "operation failed — try again" }, 500); }
       }
       // Admin: one-time catalogue migration (KV -> DO storage).
       // PROTECTED and UNEXECUTED until separately approved: it requires
@@ -3276,6 +3298,12 @@ export class TunnelDO {
           return json({ ok: true, count, sha256: hash, verified: true });
           });
         } catch (e) {
+          // Missing / malformed source is a hard migration failure with
+          // an admin-facing message (this endpoint is checkPw-gated);
+          // it is NOT a transient read failure, so it gets its own
+          // message rather than "temporarily unreadable — try again".
+          if (e && e.code === "KV_SOURCE_MISSING") return json({ error: "migration source missing — KV ext:movies not found" }, 500);
+          if (e && e.code === "KV_SOURCE_MALFORMED") return json({ error: "migration source malformed — KV ext:movies is not a catalogue object" }, 500);
           if (e && isStoreReadFailure(e)) return json({ error: "stored data temporarily unreadable — try again" }, 500);
           return json({ error: "operation failed — try again" }, 500);
         }

@@ -1,15 +1,17 @@
-# Phase 2a tests — runs on every push to main so anyone reviewing the
-# repo (including ChatGPT) can verify the suite from the green check
-# alone, without trusting a reported test count.
+# Phase 2a tests — runs on every push to main and every pull request
+# targeting main, so anyone reviewing the repo (including ChatGPT) can
+# verify the suite from the green check alone, without trusting a
+# reported test count.
 #
 # What it runs:
 #   1. node --check worker.js (syntax; does NOT cover JS inside the
 #      ADMIN_PAGE template literal — check_phase2a.js does that)
-#   2. node --test on the two unit suites (47 tests: 9 Phase 2a +
-#      38 hardening — T1–T11 sources editor, flag cleanup, lastSuccess,
+#   2. node --test on the two unit suites (81 tests: 9 Phase 2a +
+#      72 hardening — T1–T11 sources editor, flag cleanup, lastSuccess,
 #      overlap guard, partial-write recovery R1–R3b/R5–R10, config-race
 #      R11–R15, G1+G2 strict-read remediation R25–R29, dup-check
-#      correction R30–R32)
+#      correction R30–R32, freeze/migrate FZ1–FZ4, F1 approval-first
+#      R38–R60, correction pass R61–R67)
 #   3. check_phase2a.js — template extraction + admin-JS functional
 #      checks (sources editor, failed-run vs last-success card)
 #   4. verify_cron_checks.mjs — frequency mapping, disabled no-op,
@@ -24,6 +26,8 @@ name: Phase 2a tests
 
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
 
 jobs:

@@ -26,7 +26,7 @@ function makeKV(initial = {}) {
     _map: m,
   };
 }
-function makeDO({ kv, tmdbKey = "FAKEKEY", live = null, slowKey = false, realList = false, catalogue = null, failStoreGet = null, failStorePut = null, commitThrowPut = null } = {}) {
+function makeDO({ kv, tmdbKey = "FAKEKEY", live = null, slowKey = false, realList = false, catalogue = null, failStoreGet = null, failStorePut = null, commitThrowPut = null, slowStorePut = null, slowStorePutMs = 100 } = {}) {
   const env = { DATA_KV: kv, TMDB_KEY: undefined, DISCOVERY_CRON_SECRET: "cronsecret", S3_ACCESS_KEY: "x", S3_SECRET_KEY: "y" };
   // DO storage stub: a real backing Map (the freeze flag and, after F1,
   // the catalogue live here). Seeded with the two keys the worker reads
@@ -37,6 +37,9 @@ function makeDO({ kv, tmdbKey = "FAKEKEY", live = null, slowKey = false, realLis
   // failStoreGet / failStorePut throw on a matching (key, call#);
   // commitThrowPut commits the put and THEN throws (an ambiguous
   // write: the value landed but the caller saw a failure) — R51d.
+  // slowStorePut delays a matching put by slowStorePutMs — R64 holds
+  // a catalogue writer in flight to prove the freeze endpoint waits
+  // for it before returning.
   // The stub clones on get and put, like real DO storage (which returns
   // a fresh deserialized copy): the worker's in-place mutation of a
   // fetched object must not leak into the store unless the put lands.
@@ -54,6 +57,7 @@ function makeDO({ kv, tmdbKey = "FAKEKEY", live = null, slowKey = false, realLis
     },
     put: async (k, v) => {
       perKeyPut[k] = (perKeyPut[k] || 0) + 1;
+      if (slowStorePut && slowStorePut(k, perKeyPut[k])) await new Promise((r) => setTimeout(r, slowStorePutMs));
       if (commitThrowPut && commitThrowPut(k, perKeyPut[k])) { store.set(k, clone(v)); throw new Error("store put boom: " + k); }
       if (failStorePut && failStorePut(k, perKeyPut[k])) throw new Error("store put boom: " + k);
       store.set(k, clone(v));
@@ -1800,4 +1804,186 @@ test("R60 cross-entry isolation: a meta-approve leaves other entries byte-identi
   assert.equal(ap.status, 200);
   assert.equal(JSON.stringify(catOf(d)["emv2"]), beforeB, "entry B is byte-identical");
   assert.equal(catOf(d)["emv1"].title, "Renamed Movie One", "entry A changed as proposed");
+});
+
+// ---- Correction pass (2026-11-14, Redowan's independent review) ----
+// R61–R63: the public catalogue read path fails closed (listMovies is
+// strict in every path now — a missing or unreadable DO catalogue is a
+// hard 500, never a silently R2-only feed). R64: freeze activation is
+// serialized with the catalogue writers through _withAdminLock.
+// R65–R67: a missing or malformed KV migration source hard-fails.
+
+test("R61 public feed fails closed on a missing DO catalogue key (control: stored {} lists R2-only)", async () => {
+  // Control: an explicitly stored {} is a legitimate empty catalogue.
+  const kvC = makeKV({ "ext:pending": {} });
+  const dC = makeDO({ kv: kvC, realList: true, catalogue: {} });
+  stubS3(dC);
+  const okMovies = await callGet(dC, "/api/movies");
+  assert.equal(okMovies.status, 200, "control: a stored {} catalogue must list");
+  assert.equal(okMovies.body.movies.length, 1, "control: R2-only feed has the one stubbed movie");
+  assert.equal(okMovies.body.movies[0].title, "iron-man-2008-english");
+  const okSite = await dC.fetch(new Request("https://internal/sitemap.xml", { method: "GET" }));
+  assert.equal(okSite.status, 200, "control: sitemap lists with a stored {} catalogue");
+  assert.ok((await okSite.text()).includes("iron-man-2008-english"), "control: sitemap contains the R2 movie");
+  // Missing key: no catalogue seeded at all.
+  const kvF = makeKV({ "ext:pending": {} });
+  const dF = makeDO({ kv: kvF, realList: true }); // no `catalogue` option: unseeded
+  stubS3(dF);
+  const badMovies = await callGet(dF, "/api/movies");
+  assert.equal(badMovies.status, 500, "an unseeded catalogue must fail /api/movies, not return an R2-only list");
+  assert.equal(badMovies.body.movies, undefined, "no partial movies list on failure");
+  const badSite = await dF.fetch(new Request("https://internal/sitemap.xml", { method: "GET" }));
+  assert.equal(badSite.status, 500, "an unseeded catalogue must fail /sitemap.xml too");
+  assert.equal(dF.state.storage._map.get("ext:movies"), undefined, "nothing was auto-seeded by the failed reads");
+});
+
+test("R62 public feed fails closed on a transient DO storage read failure", async () => {
+  const live11 = seedLive11();
+  // Control: healthy reads list R2 + all 11 ext entries.
+  const kvC = makeKV({ "ext:pending": {} });
+  const dC = makeDO({ kv: kvC, realList: true, catalogue: JSON.parse(JSON.stringify(live11)) });
+  stubS3(dC);
+  const ok = await callGet(dC, "/api/movies");
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.movies.length, 12, "control: 1 R2 movie + 11 ext entries");
+  // Every ext:movies read fails (the R2 meta: get is a different key
+  // and is unaffected, so the failure under test is the catalogue read).
+  const kvF = makeKV({ "ext:pending": {} });
+  const dF = makeDO({ kv: kvF, realList: true, catalogue: JSON.parse(JSON.stringify(live11)), failStoreGet: (k) => k === "ext:movies" });
+  stubS3(dF);
+  const before = catJSON(dF);
+  const bad = await callGet(dF, "/api/movies");
+  assert.equal(bad.status, 500, "a transient catalogue read failure must fail /api/movies, not return an R2-only list");
+  assert.equal(bad.body.movies, undefined, "no partial movies list on failure");
+  const badSite = await dF.fetch(new Request("https://internal/sitemap.xml", { method: "GET" }));
+  assert.equal(badSite.status, 500, "a transient catalogue read failure must fail /sitemap.xml too");
+  assert.equal(catJSON(dF), before, "catalogue byte-identical after the failed reads");
+});
+
+test("R63 discovery run fails closed on a transient catalogue read failure", async () => {
+  const base = {
+    "ext:pending": {},
+    "ext:discovery:seen": {},
+    "ext:discovery:state": { enabled: true, frequency: "daily", sources: { tmdb: true, trending: true, upcoming: false, tvmaze: false }, budget: { maxNewPerRun: 15, maxDetailCalls: 30 }, lastRun: null, lastSuccess: null, totals: { discovered: 0, approved: 0, rejected: 0 }, nextRunAt: null },
+  };
+  globalThis.fetch = oneMovieFetch();
+  // Control: healthy reads -> the one fresh title (1001, not live:
+  // the catalogue here holds only Iron Man, tmdb 1726) is filed.
+  const kvC = makeKV(JSON.parse(JSON.stringify(base)));
+  const dC = makeDO({ kv: kvC, realList: true, catalogue: JSON.parse(JSON.stringify(ironLive)) });
+  stubS3(dC);
+  const runC = await dC.runDiscovery(dC.env, "manual");
+  assert.equal(runC.status, "ok", "control run must succeed with these seeds");
+  assert.equal(runC.counts.newCandidates, 1, "control: the fresh title is filed");
+  // Failing catalogue read in the dedupe phase: the run must fail,
+  // not dedupe blind against R2-only.
+  const kvF = makeKV(JSON.parse(JSON.stringify(base)));
+  const dF = makeDO({ kv: kvF, realList: true, catalogue: JSON.parse(JSON.stringify(ironLive)), failStoreGet: (k) => k === "ext:movies" });
+  stubS3(dF);
+  const runF = await dF.runDiscovery(dF.env, "manual");
+  assert.equal(runF.status, "failed", "a run that cannot read the catalogue must fail, not run blind");
+  assert.equal(runF.counts.newCandidates, 0, "nothing filed after a failed catalogue read");
+  assert.equal(Object.keys(await kvObj(kvF, "ext:pending")).length, 0, "queue byte-identical — nothing filed");
+  const st = await stateOf(kvF);
+  assert.equal(st.lastRun.status, "failed", "failure recorded in lastRun");
+});
+
+test("R64 freeze waits for an in-flight catalogue writer: no write slips past the barrier", async () => {
+  const live11 = seedLive11();
+  const kv = makeKV({
+    "ext:pending": { "p-1": { id: "p-1", title: "New Film", type: "movie", tmdb: 2001, year: "2026", sources: [{ label: "S1", url: "https://example.com/play/2001" }], status: "pending", createdAt: 1 } },
+    "ext:discovery:seen": {},
+    "ext:discovery:state": {},
+  });
+  // Hold the approve's catalogue put in flight for 100ms.
+  const d = makeDO({ kv, live: liveListOf(live11), catalogue: live11, slowStorePut: (k) => k === "ext:movies", slowStorePutMs: 100 });
+  const order = [];
+  const approveP = call(d, "/api/admin/pending/approve", { id: "p-1" }).then((r) => { order.push("approve"); return r; });
+  const freezeP = call(d, "/api/admin/catalogue-freeze", { frozen: true }).then((r) => { order.push("freeze"); return r; });
+  let freezeDone = false;
+  freezeP.then(() => { freezeDone = true; });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(freezeDone, false, "the freeze must not return while a catalogue writer is still in flight");
+  const approveR = await approveP;
+  const freezeR = await freezeP;
+  assert.deepEqual(order, ["approve", "freeze"], "the writer completes before freeze activation returns");
+  assert.equal(approveR.status, 200, "the in-flight approve completes");
+  assert.equal(freezeR.status, 200, "the freeze then succeeds");
+  assert.equal(freezeR.body.frozen, true);
+  assert.equal(Object.keys(catOf(d)).length, 12, "the writer's entry landed before the freeze");
+  const published = Object.values(catOf(d)).find((e) => e.pendingId === "p-1");
+  assert.ok(published, "the writer's entry is in the catalogue");
+  assert.equal(published.title, "New Film");
+  assert.equal(approveR.body.id, published.id, "approve returned the new live id");
+  const get = await callGet(d, "/api/admin/catalogue-freeze");
+  assert.equal(get.body.frozen, true, "the flag reads back as set");
+  // A later writer is blocked by the barrier.
+  const blocked = await call(d, "/api/admin/extpublish", { id: "emv1", unlisted: true });
+  assert.equal(blocked.status, 503, "a catalogue write after the freeze must be blocked");
+  assert.equal(blocked.body.error, FROZEN_MSG);
+  assert.equal(Object.keys(catOf(d)).length, 12, "the blocked write changed nothing");
+});
+
+test("R65 migration with a missing KV source hard-fails: 500, nothing seeded", async () => {
+  const kv = makeKV({ "ext:pending": {}, "ext:discovery:seen": {}, "ext:discovery:state": {} }); // no "ext:movies" key at all
+  const d = makeDO({ kv });
+  const set = await call(d, "/api/admin/catalogue-freeze", { frozen: true });
+  assert.equal(set.status, 200);
+  const mig = await call(d, "/api/admin/catalogue-migrate", {});
+  assert.equal(mig.status, 500, "a missing migration source must hard-fail, not seed an empty catalogue");
+  assert.equal(mig.body.error, "migration source missing — KV ext:movies not found");
+  assert.equal(d.state.storage._map.get("ext:movies"), undefined, "nothing seeded on a missing source");
+});
+
+test("R66 migration with a malformed KV source hard-fails: 500, nothing seeded", async () => {
+  async function tryMigrate(source, raw) {
+    const kv = makeKV({ "ext:pending": {}, "ext:discovery:seen": {}, "ext:discovery:state": {} });
+    if (raw !== undefined) kv._map.set("ext:movies", raw);
+    else if (source !== undefined) kv._map.set("ext:movies", JSON.stringify(source));
+    const d = makeDO({ kv });
+    await call(d, "/api/admin/catalogue-freeze", { frozen: true });
+    const mig = await call(d, "/api/admin/catalogue-migrate", {});
+    return { mig, d };
+  }
+  // (a) Invalid JSON: the KV json read itself throws.
+  const bad = await tryMigrate(undefined, "{not valid json");
+  assert.equal(bad.mig.status, 500, "an invalid-JSON source must hard-fail");
+  assert.equal(bad.mig.body.error, "stored data temporarily unreadable — try again", "an unreadable source gets the generic message");
+  assert.equal(bad.d.state.storage._map.get("ext:movies"), undefined, "nothing seeded on invalid JSON");
+  // (b) Valid JSON, wrong shape: an array is not a catalogue object.
+  const arr = await tryMigrate([1, 2, 3]);
+  assert.equal(arr.mig.status, 500, "an array source must hard-fail");
+  assert.equal(arr.mig.body.error, "migration source malformed — KV ext:movies is not a catalogue object");
+  assert.equal(arr.d.state.storage._map.get("ext:movies"), undefined, "nothing seeded on an array source");
+  // (c) Valid JSON, wrong shape: a string is not a catalogue object.
+  const str = await tryMigrate("hello");
+  assert.equal(str.mig.status, 500, "a string source must hard-fail");
+  assert.equal(str.mig.body.error, "migration source malformed — KV ext:movies is not a catalogue object");
+  assert.equal(str.d.state.storage._map.get("ext:movies"), undefined, "nothing seeded on a string source");
+});
+
+test("R67 valid KV sources still migrate: 11 entries and an explicitly stored empty catalogue", async () => {
+  // (a) The normal case: 11 entries.
+  const live11 = seedLive11();
+  const kvA = makeKV({ "ext:movies": live11, "ext:pending": {}, "ext:discovery:seen": {}, "ext:discovery:state": {} });
+  const dA = makeDO({ kv: kvA });
+  await call(dA, "/api/admin/catalogue-freeze", { frozen: true });
+  const expectedHash = createHash("sha256").update(JSON.stringify(live11)).digest("hex");
+  const migA = await call(dA, "/api/admin/catalogue-migrate", {});
+  assert.equal(migA.status, 200, "a valid source must still migrate");
+  assert.equal(migA.body.count, 11);
+  assert.equal(migA.body.sha256, expectedHash);
+  assert.equal(migA.body.verified, true);
+  assert.deepEqual(dA.state.storage._map.get("ext:movies"), live11);
+  // (b) The boundary case: an explicitly stored {} is a present value
+  // and migrates as an empty catalogue (count 0) — distinct from a
+  // missing key, which hard-fails (R65).
+  const kvB = makeKV({ "ext:movies": {}, "ext:pending": {}, "ext:discovery:seen": {}, "ext:discovery:state": {} });
+  const dB = makeDO({ kv: kvB });
+  await call(dB, "/api/admin/catalogue-freeze", { frozen: true });
+  const migB = await call(dB, "/api/admin/catalogue-migrate", {});
+  assert.equal(migB.status, 200, "an explicitly stored empty catalogue must migrate");
+  assert.equal(migB.body.count, 0);
+  assert.equal(migB.body.verified, true);
+  assert.deepEqual(dB.state.storage._map.get("ext:movies"), {});
 });
