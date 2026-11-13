@@ -35,7 +35,8 @@ jobs:
         run: node --check worker.js
       - name: Generate worker.mjs test stub
         working-directory: .phase2a-test
-        run: sed '1s/.*/\/\/ test stub: EmailMessage is cloudflare-only\nclass EmailMessage { constructor(from, to, body) { this.from = from; this.to = to; this.body = body; } }/' ../worker.js > worker.mjs
+        run: |
+          sed '1s/.*/\/\/ test stub: EmailMessage is cloudflare-only\nclass EmailMessage { constructor(from, to, body) { this.from = from; this.to = to; this.body = body; } }/' ../worker.js > worker.mjs
       - name: Unit tests (Phase 2a + hardening)
         working-directory: .phase2a-test
         run: node --test test_phase2a.mjs test_pending_sources.mjs
