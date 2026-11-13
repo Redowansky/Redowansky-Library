@@ -2627,7 +2627,7 @@ export class TunnelDO {
       if (path === "/" || path === "/index.html")
         return this.pageResp(PAGE, request);
       if (path === "/admin" || path === "/admin.html")
-        return new Response(ADMIN_PAGE, { headers: { "content-type": "text/html;charset=utf-8" } });
+        return new Response(ADMIN_PAGE, { headers: { "content-type": "text/html;charset=utf-8", "cache-control": "no-store" } });
       if (path === "/api/admin/upload" && request.method === "PUT") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         const bucket = url.searchParams.get("bucket"), key = url.searchParams.get("key");
