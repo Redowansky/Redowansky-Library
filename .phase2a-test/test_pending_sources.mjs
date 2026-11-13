@@ -316,3 +316,159 @@ test("overlap guard: concurrent runs serialize, no double-filing", async () => {
   const pend = await kvObj(kv, "ext:pending");
   assert.equal(Object.keys(pend).length, 3);
 });
+
+// ---- Partial-write recovery (review 2026-11-13 item 1) ----
+// A discovery run persists three separate KV keys (queue, seen, state) —
+// not a transaction. These tests fail one write at a time and check the
+// three stores stay consistent (or heal) and a retry never duplicates.
+function makeFailingKV(initial = {}, failPut = null) {
+  const kv = makeKV(initial);
+  const perKey = {};
+  const origPut = kv.put.bind(kv);
+  kv.put = async (k, v) => {
+    perKey[k] = (perKey[k] || 0) + 1;
+    if (failPut && failPut(k, perKey[k])) throw new Error("kv put boom: " + k);
+    return origPut(k, v);
+  };
+  return kv;
+}
+function oneMovieFetch() {
+  return async (url) => {
+    const u = String(url);
+    const ok = (obj) => ({ ok: true, status: 200, json: async () => obj });
+    if (u.includes("/discover/movie")) return ok({ results: [{ id: 1001, popularity: 5 }] });
+    if (u.includes("/discover/tv")) return ok({ results: [] });
+    if (u.includes("/trending/movie")) return ok({ results: [] });
+    if (u.includes("/trending/tv")) return ok({ results: [] });
+    if (u.includes("/watch/providers")) return ok({ results: {} });
+    const m = u.match(/\/(movie|tv)\/(\d+)\?/);
+    if (m) return ok({ id: 1001, title: "T1001", release_date: "2026-11-12", overview: "", poster_path: null, backdrop_path: null, vote_average: 7, genres: [] });
+    return ok({});
+  };
+}
+async function stateOf(kv) { return kvObj(kv, "ext:discovery:state"); }
+
+// R1: queue write lands, seen write throws once -> failure-path
+// reconciler heals immediately; retry files nothing twice.
+test("R1 queue ok + seen fails once: healed in the failed run, retry clean", async () => {
+  const kv = makeFailingKV({}, (k, n) => k === "ext:discovery:seen" && n === 1);
+  globalThis.fetch = oneMovieFetch();
+  const d = makeDO({ kv });
+  const run1 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run1.status, "failed");
+  let pend = await kvObj(kv, "ext:pending");
+  assert.equal(Object.keys(pend).length, 1); // candidate landed in the queue
+  let seen = await kvObj(kv, "ext:discovery:seen");
+  assert.ok(seen["movie:1001"], "seen healed by the failure-path reconciler");
+  assert.equal(seen["movie:1001"].status, "pending");
+  let st = await stateOf(kv);
+  assert.equal(st.totals.discovered, 1, "totals bump healed too");
+  assert.equal(st.lastRun.status, "failed");
+  assert.equal(st.lastSuccess, null);
+  const run2 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run2.status, "ok");
+  assert.equal(run2.counts.newCandidates, 0, "retry dedupes via seen");
+  pend = await kvObj(kv, "ext:pending");
+  assert.equal(Object.keys(pend).length, 1, "no duplicate filing on retry");
+  st = await stateOf(kv);
+  assert.equal(st.totals.discovered, 1, "totals not double-bumped");
+});
+
+// R2: seen write throws twice (batch + failure-path reconciler both fail)
+// -> gap persists after run 1; start-of-run reconciler heals it on run 2.
+test("R2 seen fails twice: gap persists, next run heals it, retry clean", async () => {
+  const kv = makeFailingKV({}, (k, n) => k === "ext:discovery:seen" && n <= 2);
+  globalThis.fetch = oneMovieFetch();
+  const d = makeDO({ kv });
+  const run1 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run1.status, "failed");
+  let pend = await kvObj(kv, "ext:pending");
+  assert.equal(Object.keys(pend).length, 1);
+  let seen = await kvObj(kv, "ext:discovery:seen");
+  assert.equal(Object.keys(seen).length, 0, "seen gap persists after run 1");
+  let st = await stateOf(kv);
+  assert.equal(st.totals.discovered, 0, "totals bump lost with the seen write");
+  const run2 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run2.status, "ok");
+  assert.equal(run2.counts.newCandidates, 0, "retry dedupes via the healed seen entry");
+  pend = await kvObj(kv, "ext:pending");
+  assert.equal(Object.keys(pend).length, 1, "no duplicate filing on retry");
+  seen = await kvObj(kv, "ext:discovery:seen");
+  assert.ok(seen["movie:1001"], "start-of-run reconciler healed the gap");
+  st = await stateOf(kv);
+  assert.equal(st.totals.discovered, 1, "totals healed by the retry");
+});
+
+// R3: queue + seen land, state save throws once (transient) -> the
+// failed-record save persists the totals bump; retry files nothing twice.
+test("R3 state save fails once: totals survive via the failed-record save", async () => {
+  const kv = makeFailingKV({}, (k, n) => k === "ext:discovery:state" && n === 1);
+  globalThis.fetch = oneMovieFetch();
+  const d = makeDO({ kv });
+  const run1 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run1.status, "failed");
+  let pend = await kvObj(kv, "ext:pending");
+  assert.equal(Object.keys(pend).length, 1);
+  let seen = await kvObj(kv, "ext:discovery:seen");
+  assert.ok(seen["movie:1001"]);
+  let st = await stateOf(kv);
+  assert.equal(st.lastRun.status, "failed");
+  assert.equal(st.totals.discovered, 1, "bump survived: finish(failed) re-saved state");
+  const run2 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run2.status, "ok");
+  assert.equal(run2.counts.newCandidates, 0);
+  pend = await kvObj(kv, "ext:pending");
+  assert.equal(Object.keys(pend).length, 1, "no duplicate filing on retry");
+});
+
+// R3b: state save fails persistently -> nothing about the run is recorded
+// (lastRun stays stale, totals stay stale), but queue + seen are intact
+// and the retry still cannot duplicate. This residual totals gap is
+// documented, not hidden: totals is best-effort, queue/seen authoritative.
+test("R3b state save fails always: run unrecorded, queue+seen intact, retry clean", async () => {
+  const kv = makeFailingKV({}, (k) => k === "ext:discovery:state");
+  globalThis.fetch = oneMovieFetch();
+  const d = makeDO({ kv });
+  const run1 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run1.status, "failed");
+  let pend = await kvObj(kv, "ext:pending");
+  assert.equal(Object.keys(pend).length, 1);
+  let seen = await kvObj(kv, "ext:discovery:seen");
+  assert.ok(seen["movie:1001"]);
+  let st = await stateOf(kv);
+  assert.equal(kv._map.get("ext:discovery:state"), undefined, "no run record persisted (state key never written)");
+  assert.equal((st.totals || {}).discovered || 0, 0, "totals bump lost (known residual gap)");
+  const run2 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run2.status, "failed", "state save still down");
+  pend = await kvObj(kv, "ext:pending");
+  assert.equal(Object.keys(pend).length, 1, "no duplicate filing on retry");
+});
+
+// R5: a rejected discovery candidate missing from seen is healed with
+// status "rejected" (not "pending") and counts toward totals.
+test("R5 rejected candidate healed with rejected status", async () => {
+  const kv = makeKV({ "ext:pending": { "p-rej1": { id: "p-rej1", title: "Old Film", type: "movie", tmdb: 999002, year: "2025", sources: [], status: "rejected", discoveredAt: "2026-11-12T01:00:00.000Z", discoveredVia: "tmdb-discover", createdAt: 1 } } });
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ results: [] }) });
+  const d = makeDO({ kv });
+  const run = await d.runDiscovery(d.env, "manual");
+  assert.equal(run.status, "ok");
+  const seen = await kvObj(kv, "ext:discovery:seen");
+  assert.ok(seen["movie:999002"]);
+  assert.equal(seen["movie:999002"].status, "rejected");
+  const st = await stateOf(kv);
+  assert.equal(st.totals.discovered, 1);
+});
+
+// R6: manual candidates (no discoveredAt) are never healed and never
+// counted — the reconciler only touches discovery-filed candidates.
+test("R6 manual candidates are not healed or counted", async () => {
+  const kv = makeKV({ "ext:pending": { "p-man1": { id: "p-man1", title: "Hand Added", type: "movie", tmdb: 999003, year: "2026", sources: [], status: "pending", discoveredVia: "manual", createdAt: 1 } } });
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ results: [] }) });
+  const d = makeDO({ kv });
+  const run = await d.runDiscovery(d.env, "manual");
+  assert.equal(run.status, "ok");
+  const seen = await kvObj(kv, "ext:discovery:seen");
+  assert.equal(Object.keys(seen).length, 0);
+  const st = await stateOf(kv);
+  assert.equal(st.totals.discovered, 0);
+});

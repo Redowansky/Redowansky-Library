@@ -578,6 +578,41 @@ async function getDiscoveryState(env){
 async function saveDiscoveryState(env, obj){
   await env.DATA_KV.put("ext:discovery:state", JSON.stringify(obj));
 }
+// Idempotent recovery for partial-write failures (review 2026-11-13).
+// A discovery run persists three separate KV keys (queue, seen, state),
+// not a transaction. If the queue write lands but the seen write fails,
+// candidates sit in ext:pending with no seen entry (and the totals bump
+// is lost). Heal that gap from the queue itself: every queued discovery
+// candidate (has discoveredAt — manual candidates do not) missing from
+// seen gets a seen entry in its own status (pending/rejected), and
+// totals.discovered is bumped by the healed count. Safe to run any time:
+// re-running finds no gaps and writes nothing. Never throws.
+// `state` is the caller's in-memory state object — it is kept in sync so
+// a later finish() cannot overwrite the bump with a stale value; the
+// state is re-read fresh before saving so a concurrent admin config
+// change is not clobbered.
+async function reconcileDiscoveryState(env, state){
+  try {
+    const pend = await getPending(env);
+    const seen = await getSeen(env);
+    const today = new Date().toISOString().slice(0, 10);
+    let healed = 0;
+    for (const c of Object.values(pend)) {
+      if (!c || !c.tmdb || !c.discoveredAt) continue;
+      const k = c.type + ":" + c.tmdb;
+      if (seen[k]) continue;
+      seen[k] = { type: c.type, tmdb: c.tmdb, title: c.title, firstSeen: (c.discoveredAt || "").slice(0, 10) || today, lastSeen: today, status: c.status === "rejected" ? "rejected" : "pending" };
+      healed++;
+    }
+    if (!healed) return 0;
+    await saveSeen(env, seen);
+    const fresh = await getDiscoveryState(env);
+    fresh.totals.discovered = (fresh.totals.discovered || 0) + healed;
+    await saveDiscoveryState(env, fresh);
+    if (state) state.totals.discovered = fresh.totals.discovered;
+    return healed;
+  } catch (e) { return 0; }
+}
 async function getSeen(env){
   try { return await env.DATA_KV.get("ext:discovery:seen", "json") || {}; } catch (e) { return {}; }
 }
@@ -1929,7 +1964,10 @@ export class TunnelDO {
       if (state.nextRunAt && started < Date.parse(state.nextRunAt)) return { at: runAt, trigger, status: "skipped", counts, durationMs: 0, error: "not due yet" };
     }
     const apiKey = (env.TMDB_KEY || await this.state.storage.get("tmdb_key"));
-    if (!apiKey) return finish("failed", "no TMDB key");
+    if (!apiKey) return await finish("failed", "no TMDB key");
+    // Heal any seen-map gap left by an earlier partial-write failure
+    // before this run dedupes (idempotent; no-op when nothing is missing).
+    await this._withAdminLock(() => reconcileDiscoveryState(env, state));
     try {
       const ymd = (d) => d.toISOString().slice(0, 10);
       const lastDate = state.lastRun && state.lastRun.at ? state.lastRun.at.slice(0, 10) : ymd(new Date(started - 7 * 864e5));
@@ -2034,9 +2072,12 @@ export class TunnelDO {
         counts.skipped += (newCands.length - filed.length);
         state.totals.discovered = (state.totals.discovered || 0) + filed.length;
       });
-      return finish("ok", null);
+      return await finish("ok", null);
     } catch (e) {
-      return finish("failed", String((e && e.message) || e));
+      // Heal any partial write from the run that just failed, so the
+      // failed run itself leaves queue/seen consistent.
+      await this._withAdminLock(() => reconcileDiscoveryState(env, state));
+      return await finish("failed", String((e && e.message) || e));
     }
     } catch (e) {
       // Setup failure (state read / TMDB-key read threw, or finish()

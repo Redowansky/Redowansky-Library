@@ -133,6 +133,19 @@ if (!pl.includes("BD: Netflix, Prime Video") || !pl.includes("US: Hulu")) throw 
   if (els["discEnabled"].checked !== true) throw new Error("discEnabled not set from state");
   if (els["discFreq"].value !== "daily") throw new Error("discFreq not set from state");
 
+  // failed last run + preserved last success: the card must show both,
+  // and never confuse the failed attempt with the last good run
+  vm.runInContext("renderDiscovery({lastRun:{at:'2026-11-13T02:28:46.820Z',trigger:'manual',status:'failed',counts:{fetched:100,newCandidates:0,duplicates:18,skipped:61,failed:1,bySource:{'tmdb-discover':40,'tmdb-trending':40,'tmdb-upcoming':20}},durationMs:4257,error:'kv put boom'},lastSuccess:{at:'2026-11-13T01:48:19.664Z',trigger:'manual',counts:{fetched:80,newCandidates:15,duplicates:1,skipped:64,failed:0},durationMs:3920},totals:{discovered:30,approved:0,rejected:0},nextRunAt:'2026-11-14T02:28:46.820Z'})", sandbox);
+  const lastF = els["discLast"].innerHTML;
+  console.log("discLast (failed run):", lastF.replace(/\s+/g, " ").slice(0, 300));
+  if (!lastF.includes("failed")) throw new Error("failed last run not shown");
+  if (!lastF.includes("kv put boom")) throw new Error("failed run error not shown");
+  if (!lastF.includes("Last successful run:")) throw new Error("last success line missing after a failed run");
+  if (!lastF.includes("2026")) throw new Error("last success date missing");
+  // a state with NO last success must not show the line at all
+  vm.runInContext("renderDiscovery({lastRun:{at:'2026-11-13T02:28:46.820Z',trigger:'manual',status:'failed',counts:{fetched:0,newCandidates:0,duplicates:0,skipped:0,failed:1},durationMs:10,error:'no TMDB key'},lastSuccess:null,totals:{discovered:0,approved:0,rejected:0},nextRunAt:null})", sandbox);
+  if (els["discLast"].innerHTML.includes("Last successful run:")) throw new Error("last success line shown with no successful run");
+
   // renderPend with a discovered, sourceless candidate
   vm.runInContext("pendCache={pending:[{id:'p1',title:'Test Movie',type:'movie',tmdb:123,year:'2026',discoveredVia:'tmdb-discover',discoveredAt:'2026-11-13T06:00:00.000Z',needsSource:true,sources:[],providers:{BD:['Netflix']},overview:'A test.',poster:'/abc.jpg',createdAt:1763000000000}],rejected:[]};pendTabCur='pending';renderPend()", sandbox);
   const html = els["pendList"].innerHTML;
