@@ -1,7 +1,10 @@
 // Tests for the Phase 2a hardening: editable pending sources (T1–T11),
 // flag-cleanup regression tests, lastSuccess recording, overlap guard,
 // and partial-write recovery (R1–R3b, R5–R10: failed reads, failed
-// writes, retries, strict-read aborts, reconciler failure signaling).
+// writes, retries, strict-read aborts, reconciler failure signaling),
+// and the discovery config race (R11–R15: finish() merging onto fresh
+// state, config-endpoint lock, failed-run preservation, strict
+// bookkeeping reads).
 // Run: node --test .phase2a-test/test_pending_sources.mjs (from ~/workspace/sia-lab)
 // worker.mjs is regenerated from worker.js (see test_phase2a.mjs header).
 import test from "node:test";
@@ -639,4 +642,157 @@ test("R10 reconciler state read fails after a good initial load: run aborts, con
   assert.equal(st.lastRun.status, "ok");
   pend = await kvObj(kv, "ext:pending");
   assert.equal(Object.keys(pend).length, 1, "queue candidate intact, not duplicated");
+});
+
+// ---- Config race: finish() must not overwrite newer admin settings (round 8) ----
+// R11: a config change made while a run is executing survives the run.
+// The run files its candidate (its work is preserved) but the stored state
+// keeps the NEW config — finish() merges onto a fresh read instead of saving
+// the stale run-start snapshot.
+test("R11 config change during an active run survives finish()", async () => {
+  const kv = makeKV({
+    "ext:pending": {},
+    "ext:discovery:seen": {},
+    "ext:discovery:state": { enabled: true, frequency: "daily",
+      sources: { tmdb: true, trending: true, upcoming: true, tvmaze: false },
+      budget: { maxNewPerRun: 15, maxDetailCalls: 30 },
+      lastRun: { at: "2026-11-13T01:00:00.000Z", trigger: "manual", status: "ok", counts: {}, durationMs: 100 },
+      lastSuccess: { at: "2026-11-13T01:00:00.000Z", trigger: "manual", counts: {}, durationMs: 100 },
+      totals: { discovered: 45, approved: 0, rejected: 0 }, nextRunAt: "2026-11-14T02:00:00.000Z" },
+  });
+  let release; const gate = new Promise((r) => { release = r; });
+  let listFetchStarted; const listStarted = new Promise((r) => { listFetchStarted = r; });
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    const ok = (obj) => ({ ok: true, status: 200, json: async () => obj });
+    if (u.includes("/discover/movie")) { listFetchStarted(); await gate; return ok({ results: [{ id: 1001, popularity: 5 }] }); }
+    if (u.includes("/discover/tv") || u.includes("/trending/") || u.includes("/movie/upcoming")) return ok({ results: [] });
+    if (u.includes("/watch/providers")) return ok({ results: { BD: { flatrate: [{ provider_name: "Netflix" }] } } });
+    if (u.match(/\/movie\/1001\?/)) return ok({ id: 1001, title: "New Film", release_date: "2026-11-12", overview: "One.", poster_path: "/p1.jpg", backdrop_path: null, vote_average: 7.8, genres: [{ name: "Action" }] });
+    return ok({});
+  };
+  const d = makeDO({ kv });
+  const runP = d.runDiscovery(d.env, "manual");
+  await listStarted;
+  const cfg = await call(d, "/api/admin/discovery/config", { enabled: false, frequency: "weekly", sources: { tmdb: true, trending: true, upcoming: false, tvmaze: false }, budget: { maxNewPerRun: 5 } });
+  assert.equal(cfg.status, 200, "config change lands mid-run");
+  release();
+  const run = await runP;
+  assert.equal(run.status, "ok");
+  assert.equal(run.counts.newCandidates, 1, "the run's work is preserved");
+  const st = await stateOf(kv);
+  assert.equal(st.enabled, false, "new config survives finish()");
+  assert.equal(st.frequency, "weekly");
+  assert.equal(st.budget.maxNewPerRun, 5);
+  assert.equal(st.sources.upcoming, false);
+  assert.equal(st.totals.discovered, 46, "filed candidate counted exactly once");
+  assert.equal(st.lastRun.status, "ok", "the run's own record is kept");
+  assert.equal((Date.parse(st.nextRunAt) - Date.parse(run.at)) / 864e5, 7, "nextRunAt follows the NEW weekly frequency");
+  const pend = await kvObj(kv, "ext:pending");
+  assert.equal(Object.keys(pend).length, 1, "candidate filed");
+});
+
+// R12: two concurrent config saves both apply (the endpoint takes the lock).
+test("R12 two concurrent config saves both apply", async () => {
+  const kv = makeKV({
+    "ext:pending": {}, "ext:discovery:seen": {},
+    "ext:discovery:state": { enabled: true, frequency: "daily",
+      sources: { tmdb: true, trending: true, upcoming: false, tvmaze: false },
+      budget: { maxNewPerRun: 15, maxDetailCalls: 30 },
+      lastRun: null, lastSuccess: null,
+      totals: { discovered: 0, approved: 0, rejected: 0 }, nextRunAt: null },
+  });
+  const d = makeDO({ kv });
+  const [r1, r2] = await Promise.all([
+    call(d, "/api/admin/discovery/config", { budget: { maxNewPerRun: 5 } }),
+    call(d, "/api/admin/discovery/config", { frequency: "weekly" }),
+  ]);
+  assert.equal(r1.status, 200);
+  assert.equal(r2.status, 200);
+  const st = await stateOf(kv);
+  assert.equal(st.budget.maxNewPerRun, 5, "first save's change survives");
+  assert.equal(st.frequency, "weekly", "second save's change survives");
+});
+
+// R13: a run that fails mid-way still preserves a config change made
+// while it was executing (finish("failed") merges onto fresh state too).
+test("R13 failed run preserves a mid-run config change", async () => {
+  const kv = makeFailingKV({
+    "ext:pending": {}, "ext:discovery:seen": {},
+    "ext:discovery:state": { enabled: true, frequency: "daily",
+      sources: { tmdb: true, trending: true, upcoming: false, tvmaze: false },
+      budget: { maxNewPerRun: 15, maxDetailCalls: 30 },
+      lastRun: null, lastSuccess: null,
+      totals: { discovered: 45, approved: 0, rejected: 0 }, nextRunAt: "2026-11-14T02:00:00.000Z" },
+  }, (k, n) => k === "ext:pending" && n === 1);
+  let release; const gate = new Promise((r) => { release = r; });
+  let listFetchStarted; const listStarted = new Promise((r) => { listFetchStarted = r; });
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    const ok = (obj) => ({ ok: true, status: 200, json: async () => obj });
+    if (u.includes("/discover/movie")) { listFetchStarted(); await gate; return ok({ results: [{ id: 1001, popularity: 5 }] }); }
+    if (u.includes("/discover/tv") || u.includes("/trending/") || u.includes("/movie/upcoming")) return ok({ results: [] });
+    if (u.includes("/watch/providers")) return ok({ results: {} });
+    if (u.match(/\/movie\/1001\?/)) return ok({ id: 1001, title: "New Film", release_date: "2026-11-12", overview: "One.", poster_path: "/p1.jpg", backdrop_path: null, vote_average: 7.8, genres: [{ name: "Action" }] });
+    return ok({});
+  };
+  const d = makeDO({ kv });
+  const runP = d.runDiscovery(d.env, "manual");
+  await listStarted;
+  const cfg = await call(d, "/api/admin/discovery/config", { enabled: false, frequency: "weekly" });
+  assert.equal(cfg.status, 200);
+  release();
+  const run = await runP;
+  assert.equal(run.status, "failed", "batch save failure fails the run");
+  const st = await stateOf(kv);
+  assert.equal(st.enabled, false, "config change survives the failed run");
+  assert.equal(st.frequency, "weekly");
+  assert.equal(st.lastRun.status, "failed", "the failure is recorded");
+  assert.equal(st.totals.discovered, 45, "no phantom totals bump");
+  const pend = await kvObj(kv, "ext:pending");
+  assert.equal(Object.keys(pend).length, 0, "nothing filed");
+});
+
+// R14: a config POST whose state read fails answers 500 and saves nothing
+// (previously the swallowing read would have saved defaults over the config).
+test("R14 config POST with a failing state read answers 500 and saves nothing", async () => {
+  const kv = makeFailingKV({
+    "ext:pending": {}, "ext:discovery:seen": {},
+    "ext:discovery:state": { enabled: true, frequency: "daily",
+      sources: { tmdb: true, trending: true, upcoming: false, tvmaze: false },
+      budget: { maxNewPerRun: 15, maxDetailCalls: 30 },
+      lastRun: null, lastSuccess: null,
+      totals: { discovered: 45, approved: 0, rejected: 0 }, nextRunAt: "2026-11-14T02:00:00.000Z" },
+  }, null, (k) => k === "ext:discovery:state");
+  const d = makeDO({ kv });
+  const res = await call(d, "/api/admin/discovery/config", { enabled: false });
+  assert.equal(res.status, 500, "unreadable state is a 500, not a silent reset");
+  const st = await stateOf(kv);
+  assert.equal(st.enabled, true, "stored config untouched");
+  assert.equal(st.frequency, "daily");
+  assert.equal(st.totals.discovered, 45);
+});
+
+// R15: approve with failing bookkeeping reads still succeeds, and the failed
+// reads erase nothing — markSeen/bumpDiscoveryTotal skip instead of saving
+// {} / defaults (the round-5 pattern, applied to the approval path).
+test("R15 approve with failing bookkeeping reads: approve succeeds, seen/config intact", async () => {
+  const kv = makeFailingKV({
+    "ext:pending": { "p-1": { id: "p-1", title: "New Film", type: "movie", tmdb: 1003, year: "2026", sources: [{ label: "Source 1", url: "https://example.com/play/1003" }], status: "pending", discoveredAt: "2026-11-13T01:00:00.000Z", discoveredVia: "manual", createdAt: 1 } },
+    "ext:discovery:seen": { "movie:1001": { type: "movie", tmdb: 1001, title: "Old One", firstSeen: "2026-11-12", lastSeen: "2026-11-12", status: "approved" }, "movie:1002": { type: "movie", tmdb: 1002, title: "Old Two", firstSeen: "2026-11-12", lastSeen: "2026-11-12", status: "rejected" } },
+    "ext:discovery:state": { enabled: true, frequency: "daily", sources: { tmdb: true, trending: true, upcoming: false, tvmaze: false }, budget: { maxNewPerRun: 15, maxDetailCalls: 30 }, lastRun: null, lastSuccess: null, totals: { discovered: 45, approved: 0, rejected: 0 }, nextRunAt: "2026-11-14T02:00:00.000Z" },
+    "ext:movies": {},
+  }, null, (k) => k === "ext:discovery:seen" || k === "ext:discovery:state");
+  const d = makeDO({ kv });
+  const res = await call(d, "/api/admin/pending/approve", { id: "p-1" });
+  assert.equal(res.status, 200, "approve succeeds even when bookkeeping reads fail");
+  const live = await kvObj(kv, "ext:movies");
+  assert.equal(Object.keys(live).length, 1, "candidate published");
+  const seen = await kvObj(kv, "ext:discovery:seen");
+  assert.deepEqual(Object.keys(seen).sort(), ["movie:1001", "movie:1002"], "seen-map not erased by the failed bookkeeping read");
+  const st = await stateOf(kv);
+  assert.equal(st.enabled, true, "config not reset by the failed totals read");
+  assert.equal(st.frequency, "daily");
+  assert.equal(st.totals.discovered, 45);
+  assert.equal(st.totals.approved, 0, "totals bump skipped (best-effort), not applied on a stale snapshot");
 });

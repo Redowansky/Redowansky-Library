@@ -662,7 +662,7 @@ function pruneSeen(seen, nowMs){
 async function markSeen(env, cand, status){
   try {
     if (!cand || cand.tmdb == null) return;
-    const seen = await getSeen(env);
+    const seen = await getSeenStrict(env);
     const k = (cand.type || "movie") + ":" + cand.tmdb;
     const prev = seen[k] || { type: cand.type || "movie", tmdb: cand.tmdb, title: cand.title || "", firstSeen: new Date().toISOString().slice(0, 10) };
     prev.status = status;
@@ -674,7 +674,7 @@ async function markSeen(env, cand, status){
 }
 async function bumpDiscoveryTotal(env, field){
   try {
-    const s = await getDiscoveryState(env);
+    const s = await getDiscoveryStateStrict(env);
     s.totals[field] = (s.totals[field] || 0) + 1;
     await saveDiscoveryState(env, s);
   } catch (e) {}
@@ -1984,10 +1984,36 @@ export class TunnelDO {
     try { state = await getDiscoveryStateStrict(env); }
     catch (e) { return { at: runAt, trigger, status: "failed", counts, durationMs: Date.now() - started, error: "discovery state unreadable: " + String((e && e.message) || e) }; }
     const finish = async (status, error) => {
-      state.lastRun = { at: runAt, trigger, status, counts, durationMs: Date.now() - started, error: error || null };
-      if (status === "ok") state.lastSuccess = { at: runAt, trigger, counts: { ...counts }, durationMs: Date.now() - started };
-      state.nextRunAt = nextRunAtFor(state.frequency, started);
-      await saveDiscoveryState(env, state);
+      // Save-point merge (config-race fix, 2026-11-13): the in-memory
+      // `state` is a snapshot from run start. An admin config change made
+      // while the run was executing must not be overwritten by saving
+      // that snapshot. Re-read fresh inside the admin lock, apply only
+      // this run's own record, and save that. The lock closes the window
+      // between the fresh read and the save (the config endpoint also
+      // takes the lock now), so no config change can slip in between.
+      // Never called from inside a _withAdminLock callback (no deadlock).
+      // If the fresh read throws, finish() throws and the outer catch
+      // records the failure inline with no writes — the round-7 fail-safe.
+      const runRecord = { at: runAt, trigger, status, counts, durationMs: Date.now() - started, error: error || null };
+      const cur = await this._withAdminLock(async () => {
+        const fresh = await getDiscoveryStateStrict(env);
+        fresh.lastRun = runRecord;
+        if (status === "ok") fresh.lastSuccess = { at: runAt, trigger, counts: { ...counts }, durationMs: Date.now() - started };
+        fresh.nextRunAt = nextRunAtFor(fresh.frequency, started);
+        // Totals: the run's own filed candidates are counts.newCandidates
+        // (set by the batch block; 0 if the batch never ran or failed).
+        // The reconciler's healed bump is already in `fresh` (it saved
+        // it), so add only the batch delta — never the in-memory total,
+        // which is stale.
+        fresh.totals.discovered = (fresh.totals.discovered || 0) + (counts.newCandidates || 0);
+        await saveDiscoveryState(env, fresh);
+        return fresh;
+      });
+      // Keep the in-memory object in sync for any later use in this run.
+      state.lastRun = cur.lastRun;
+      state.lastSuccess = cur.lastSuccess;
+      state.nextRunAt = cur.nextRunAt;
+      state.totals = cur.totals;
       return state.lastRun;
     };
     if (trigger === "cron") {
@@ -2131,10 +2157,17 @@ export class TunnelDO {
       // would return defaults on failure and the save below would then
       // reset the real config — unreachable state must stay untouched.
       try {
-        const s2 = await getDiscoveryStateStrict(env);
-        s2.lastRun = { at: runAt, trigger, status: "failed", counts, durationMs: Date.now() - started, error: String((e && e.message) || e) };
-        s2.nextRunAt = nextRunAtFor(s2.frequency, started);
-        await saveDiscoveryState(env, s2);
+        // Lock the failure record too (config-race fix): the fresh re-read
+        // is content-safe, but a config save between the read and the save
+        // would still be clobbered without the lock. Narrow window, failure
+        // path only — closed the same way as finish().
+        const s2 = await this._withAdminLock(async () => {
+          const s = await getDiscoveryStateStrict(env);
+          s.lastRun = { at: runAt, trigger, status: "failed", counts, durationMs: Date.now() - started, error: String((e && e.message) || e) };
+          s.nextRunAt = nextRunAtFor(s.frequency, started);
+          await saveDiscoveryState(env, s);
+          return s;
+        });
         return s2.lastRun;
       } catch (e2) {
         return { at: runAt, trigger, status: "failed", counts, durationMs: Date.now() - started, error: String((e && e.message) || e) };
@@ -2858,19 +2891,30 @@ export class TunnelDO {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         let body = {};
         try { body = await request.json(); } catch (e) {}
-        const cur = await getDiscoveryState(env);
-        if (typeof body.enabled === "boolean") cur.enabled = body.enabled;
-        if (["daily", "every2days", "weekly"].includes(body.frequency)) cur.frequency = body.frequency;
-        if (body.sources && typeof body.sources === "object") {
-          for (const k of ["tmdb", "trending", "upcoming", "tvmaze"]) if (typeof body.sources[k] === "boolean") cur.sources[k] = body.sources[k];
+        // Lock + strict read (config-race fix): without the lock this
+        // endpoint's read-modify-write can clobber a concurrent run's
+        // finish() (and vice versa), and without the strict read a KV
+        // failure would save defaults over the real config. On an
+        // unreadable state the endpoint answers 500 and saves nothing.
+        try {
+          return await this._withAdminLock(async () => {
+            const cur = await getDiscoveryStateStrict(env);
+            if (typeof body.enabled === "boolean") cur.enabled = body.enabled;
+            if (["daily", "every2days", "weekly"].includes(body.frequency)) cur.frequency = body.frequency;
+            if (body.sources && typeof body.sources === "object") {
+              for (const k of ["tmdb", "trending", "upcoming", "tvmaze"]) if (typeof body.sources[k] === "boolean") cur.sources[k] = body.sources[k];
+            }
+            if (body.budget && typeof body.budget === "object") {
+              if (Number.isFinite(+body.budget.maxNewPerRun)) cur.budget.maxNewPerRun = Math.max(1, Math.min(30, Math.round(+body.budget.maxNewPerRun)));
+              if (Number.isFinite(+body.budget.maxDetailCalls)) cur.budget.maxDetailCalls = Math.max(1, Math.min(40, Math.round(+body.budget.maxDetailCalls)));
+            }
+            if (cur.enabled && !cur.nextRunAt) cur.nextRunAt = new Date(Date.now()).toISOString();
+            await saveDiscoveryState(env, cur);
+            return json({ ok: true, state: cur });
+          });
+        } catch (e) {
+          return json({ error: "discovery state unreadable: " + String((e && e.message) || e) }, 500);
         }
-        if (body.budget && typeof body.budget === "object") {
-          if (Number.isFinite(+body.budget.maxNewPerRun)) cur.budget.maxNewPerRun = Math.max(1, Math.min(30, Math.round(+body.budget.maxNewPerRun)));
-          if (Number.isFinite(+body.budget.maxDetailCalls)) cur.budget.maxDetailCalls = Math.max(1, Math.min(40, Math.round(+body.budget.maxDetailCalls)));
-        }
-        if (cur.enabled && !cur.nextRunAt) cur.nextRunAt = new Date(Date.now()).toISOString();
-        await saveDiscoveryState(env, cur);
-        return json({ ok: true, state: cur });
       }
       // Admin: change password (stored in DO storage, survives deploys)
       if (path === "/api/admin/password" && request.method === "POST") {
