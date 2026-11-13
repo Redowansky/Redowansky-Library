@@ -5,9 +5,9 @@
 # What it runs:
 #   1. node --check worker.js (syntax; does NOT cover JS inside the
 #      ADMIN_PAGE template literal — check_phase2a.js does that)
-#   2. node --test on the two unit suites (33 tests: 9 Phase 2a +
-#      24 hardening — T1–T11 sources editor, flag cleanup, lastSuccess,
-#      overlap guard, partial-write recovery R1–R3b/R5–R9)
+#   2. node --test on the two unit suites (34 tests: 9 Phase 2a +
+#      25 hardening — T1–T11 sources editor, flag cleanup, lastSuccess,
+#      overlap guard, partial-write recovery R1–R3b/R5–R10)
 #   3. check_phase2a.js — template extraction + admin-JS functional
 #      checks (sources editor, failed-run vs last-success card)
 #   4. verify_cron_checks.mjs — frequency mapping, disabled no-op,

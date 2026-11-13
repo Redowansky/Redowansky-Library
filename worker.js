@@ -593,16 +593,25 @@ async function saveDiscoveryState(env, obj){
 // candidate (has discoveredAt — manual candidates do not) missing from
 // seen gets a seen entry in its own status (pending/rejected), and
 // totals.discovered is bumped by the healed count. Safe to run any time:
-// re-running finds no gaps and writes nothing. Never throws.
+// re-running finds no gaps and writes nothing.
 // READ-BEFORE-WRITE (review 2026-11-13 item 1): all three reads use
 // the strict variants and happen BEFORE any write. If any read fails,
-// recovery aborts with 0 and writes nothing — a failed seen read must
-// never erase existing entries, and a failed state read must never
-// reset discovery settings. `state` is the caller's in-memory state
+// recovery aborts and writes nothing — a failed seen read must never
+// erase existing entries, and a failed state read must never reset
+// discovery settings. `state` is the caller's in-memory state
 // object — it is kept in sync so a later finish() cannot overwrite
 // the bump with a stale value; the state is re-read fresh (inside the
 // lock) before saving so a concurrent admin config change is not
 // clobbered.
+// THROWS ON FAILURE (review 2026-11-13 round 7): this used to catch
+// all errors and return 0, so a failed required read was silently
+// swallowed and the run continued on its older in-memory state —
+// which finish() would then save over any newer discovery config.
+// Now a failed read (or write) THROWS, and both call sites let it
+// propagate to runDiscovery's outer catch, which re-reads state
+// fresh and records the failure there instead of saving stale state.
+// Return value is the healed count: 0 is a successful no-op (reads
+// fine, nothing missing) and is the ONLY non-throwing zero.
 // RESIDUAL (item 2): if the seen save lands but the state save fails,
 // the healed entries are recorded (seen is authoritative) but
 // totals.discovered is not bumped — it undercounts by the healed
@@ -610,26 +619,24 @@ async function saveDiscoveryState(env, obj){
 // Totals is a best-effort display counter; queue + seen are
 // authoritative. No KV transaction or atomicity is claimed anywhere.
 async function reconcileDiscoveryState(env, state){
-  try {
-    const pend = await getPendingStrict(env);
-    const seen = await getSeenStrict(env);
-    const fresh = await getDiscoveryStateStrict(env);
-    const today = new Date().toISOString().slice(0, 10);
-    let healed = 0;
-    for (const c of Object.values(pend)) {
-      if (!c || !c.tmdb || !c.discoveredAt) continue;
-      const k = c.type + ":" + c.tmdb;
-      if (seen[k]) continue;
-      seen[k] = { type: c.type, tmdb: c.tmdb, title: c.title, firstSeen: (c.discoveredAt || "").slice(0, 10) || today, lastSeen: today, status: c.status === "rejected" ? "rejected" : "pending" };
-      healed++;
-    }
-    if (!healed) return 0;
-    await saveSeen(env, seen);
-    fresh.totals.discovered = (fresh.totals.discovered || 0) + healed;
-    await saveDiscoveryState(env, fresh);
-    if (state) state.totals.discovered = fresh.totals.discovered;
-    return healed;
-  } catch (e) { return 0; }
+  const pend = await getPendingStrict(env);
+  const seen = await getSeenStrict(env);
+  const fresh = await getDiscoveryStateStrict(env);
+  const today = new Date().toISOString().slice(0, 10);
+  let healed = 0;
+  for (const c of Object.values(pend)) {
+    if (!c || !c.tmdb || !c.discoveredAt) continue;
+    const k = c.type + ":" + c.tmdb;
+    if (seen[k]) continue;
+    seen[k] = { type: c.type, tmdb: c.tmdb, title: c.title, firstSeen: (c.discoveredAt || "").slice(0, 10) || today, lastSeen: today, status: c.status === "rejected" ? "rejected" : "pending" };
+    healed++;
+  }
+  if (!healed) return 0;
+  await saveSeen(env, seen);
+  fresh.totals.discovered = (fresh.totals.discovered || 0) + healed;
+  await saveDiscoveryState(env, fresh);
+  if (state) state.totals.discovered = fresh.totals.discovered;
+  return healed;
 }
 async function getSeen(env){
   try { return await env.DATA_KV.get("ext:discovery:seen", "json") || {}; } catch (e) { return {}; }
@@ -1991,6 +1998,10 @@ export class TunnelDO {
     if (!apiKey) return await finish("failed", "no TMDB key");
     // Heal any seen-map gap left by an earlier partial-write failure
     // before this run dedupes (idempotent; no-op when nothing is missing).
+    // Throws on a failed required read/write (round 7): the throw
+    // propagates to the outer catch, which re-reads state fresh and
+    // records the failure there — the run must NOT continue on its
+    // older in-memory state and save it over a newer config.
     await this._withAdminLock(() => reconcileDiscoveryState(env, state));
     try {
       const ymd = (d) => d.toISOString().slice(0, 10);
@@ -2103,7 +2114,12 @@ export class TunnelDO {
       return await finish("ok", null);
     } catch (e) {
       // Heal any partial write from the run that just failed, so the
-      // failed run itself leaves queue/seen consistent.
+      // failed run itself leaves queue/seen consistent. If the
+      // reconciler itself fails it throws (round 7) and propagates to
+      // the outer catch, which records the failure on freshly-read
+      // state — the original error text is then replaced by the
+      // reconciler's, but the run stays failed and no stale state
+      // is saved.
       await this._withAdminLock(() => reconcileDiscoveryState(env, state));
       return await finish("failed", String((e && e.message) || e));
     }

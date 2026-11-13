@@ -1,7 +1,7 @@
 // Tests for the Phase 2a hardening: editable pending sources (T1–T11),
 // flag-cleanup regression tests, lastSuccess recording, overlap guard,
-// and partial-write recovery (R1–R3b, R5–R9: failed reads, failed
-// writes, retries, strict-read aborts).
+// and partial-write recovery (R1–R3b, R5–R10: failed reads, failed
+// writes, retries, strict-read aborts, reconciler failure signaling).
 // Run: node --test .phase2a-test/test_pending_sources.mjs (from ~/workspace/sia-lab)
 // worker.mjs is regenerated from worker.js (see test_phase2a.mjs header).
 import test from "node:test";
@@ -338,8 +338,10 @@ function makeFailingKV(initial = {}, failPut = null, failGet = null) {
     return origPut(k, v);
   };
   const origGet = kv.get.bind(kv);
+  const perKeyGet = {};
   kv.get = async (k, fmt) => {
-    if (failGet && failGet(k)) throw new Error("kv get boom: " + k);
+    perKeyGet[k] = (perKeyGet[k] || 0) + 1;
+    if (failGet && failGet(k, perKeyGet[k])) throw new Error("kv get boom: " + k);
     return origGet(k, fmt);
   };
   return kv;
@@ -557,12 +559,13 @@ test("R8 state read fails: config and history survive, recovery writes nothing",
 });
 
 // ---- Recovery accounting (review 2026-11-13 item 2) ----
-// R9: seen recovery succeeds but saving discovery state fails. The
-// healed seen entries are recorded (seen is authoritative) while
+// R9: seen heal ok + state save fails: the reconciler THROWS (round 7)
+// and the run aborts instead of continuing on possibly-stale state.
+// The healed seen entries are recorded (seen is authoritative) while
 // totals.discovered is not bumped — a documented residual: a retry
 // cannot detect or fix it (no gap remains), so totals stays stale
 // rather than silently misleading.
-test("R9 seen heal ok + state save fails: seen authoritative, totals stale (documented)", async () => {
+test("R9 seen heal ok + state save fails: run aborts, seen authoritative, totals stale (documented)", async () => {
   const kv = makeFailingKV({
     "ext:pending": { "p-new1": { id: "p-new1", title: "New Film", type: "movie", tmdb: 1003, year: "2026", sources: [], status: "pending", discoveredAt: "2026-11-13T01:00:00.000Z", discoveredVia: "tmdb-discover", createdAt: 1 } },
     "ext:discovery:seen": {},
@@ -570,13 +573,13 @@ test("R9 seen heal ok + state save fails: seen authoritative, totals stale (docu
   globalThis.fetch = emptyListsFetch;
   const d = makeDO({ kv });
   const run1 = await d.runDiscovery(d.env, "manual");
-  assert.equal(run1.status, "ok");
+  assert.equal(run1.status, "failed", "recovery failing aborts the run instead of continuing stale");
   let seen = await kvObj(kv, "ext:discovery:seen");
   assert.ok(seen["movie:1003"], "healed entry landed in the seen-map");
   assert.equal(seen["movie:1003"].status, "pending");
   let st = await stateOf(kv);
   assert.equal(st.totals.discovered, 0, "totals bump lost with the state save");
-  assert.equal(st.lastRun.status, "ok", "the run itself still recorded (second save)");
+  assert.equal(st.lastRun.status, "failed", "the abort itself is recorded on freshly-read state");
   const run2 = await d.runDiscovery(d.env, "manual");
   assert.equal(run2.status, "ok");
   seen = await kvObj(kv, "ext:discovery:seen");
@@ -585,4 +588,55 @@ test("R9 seen heal ok + state save fails: seen authoritative, totals stale (docu
   assert.equal(st.totals.discovered, 0, "totals stays stale after retry — documented, not hidden");
   const pend = await kvObj(kv, "ext:pending");
   assert.equal(Object.keys(pend).length, 1, "queue candidate intact");
+});
+
+// ---- Reconciler must signal failure, not swallow it (round 7) ----
+// R10: the initial discovery-state read succeeds but the reconciler's
+// own state read fails. The reconciler must THROW (not return 0) so
+// the run aborts instead of continuing on its older in-memory state
+// and saving it over a newer config. A retry works once reads recover.
+test("R10 reconciler state read fails after a good initial load: run aborts, config survives, retry heals", async () => {
+  const seedState = {
+    enabled: true, frequency: "weekly",
+    sources: { tmdb: true, trending: true, upcoming: true, tvmaze: false },
+    budget: { maxNewPerRun: 15, maxDetailCalls: 30 },
+    lastRun: { at: "2026-11-13T01:00:00.000Z", trigger: "manual", status: "ok", counts: { fetched: 80, newCandidates: 15, duplicates: 1, skipped: 64, failed: 0 }, durationMs: 100 },
+    lastSuccess: { at: "2026-11-13T01:00:00.000Z", trigger: "manual", counts: {}, durationMs: 100 },
+    totals: { discovered: 5, approved: 1, rejected: 0 },
+    nextRunAt: "2026-11-20T01:00:00.000Z",
+  };
+  const kv = makeFailingKV({
+    "ext:pending": { "p-new1": { id: "p-new1", title: "New Film", type: "movie", tmdb: 1003, year: "2026", sources: [], status: "pending", discoveredAt: "2026-11-13T01:00:00.000Z", discoveredVia: "tmdb-discover", createdAt: 1 } },
+    "ext:discovery:seen": {},
+    "ext:discovery:state": seedState,
+  }, null, (k, n) => k === "ext:discovery:state" && n === 2);
+  globalThis.fetch = emptyListsFetch;
+  const d = makeDO({ kv });
+  const run1 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run1.status, "failed", "reconciler read failure aborts the run");
+  assert.ok(String(run1.error || "").includes("kv get boom"), "failure names the unreadable read");
+  let seen = await kvObj(kv, "ext:discovery:seen");
+  assert.equal(Object.keys(seen).length, 0, "no recovery writes after the failed read");
+  let pend = await kvObj(kv, "ext:pending");
+  assert.deepEqual(Object.keys(pend), ["p-new1"], "queue untouched");
+  let st = await stateOf(kv);
+  assert.equal(st.enabled, true, "config not reset");
+  assert.equal(st.frequency, "weekly");
+  assert.deepEqual(st.budget, { maxNewPerRun: 15, maxDetailCalls: 30 });
+  assert.equal(st.totals.discovered, 5, "totals not reset");
+  assert.equal(st.totals.approved, 1);
+  assert.equal(st.lastRun.status, "failed", "the abort is recorded");
+  assert.ok(st.lastSuccess, "last success preserved");
+  assert.equal(st.lastSuccess.at, "2026-11-13T01:00:00.000Z");
+  // Retry once KV reads recover: the reconciler heals, the run succeeds.
+  const run2 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run2.status, "ok");
+  seen = await kvObj(kv, "ext:discovery:seen");
+  assert.ok(seen["movie:1003"], "retry healed the gap");
+  assert.equal(seen["movie:1003"].status, "pending");
+  st = await stateOf(kv);
+  assert.equal(st.totals.discovered, 6, "totals bumped exactly once by the retry");
+  assert.equal(st.lastRun.status, "ok");
+  pend = await kvObj(kv, "ext:pending");
+  assert.equal(Object.keys(pend).length, 1, "queue candidate intact, not duplicated");
 });
