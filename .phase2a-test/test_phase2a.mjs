@@ -38,10 +38,10 @@ function cannedFetch({ failDiscoverMovie = false } = {}) {
     const u = String(url);
     const ok = (obj) => ({ ok: true, status: 200, json: async () => obj });
     const bad = () => ({ ok: false, status: 429, json: async () => ({}) });
-    if (u.includes("/discover/movie")) return failDiscoverMovie ? bad() : ok({ results: [{ id: 1001 }, { id: 1726 }] });
-    if (u.includes("/discover/tv")) return ok({ results: [{ id: 2001 }] });
-    if (u.includes("/trending/movie")) return ok({ results: [{ id: 1001 }, { id: 1002 }] });
-    if (u.includes("/trending/tv")) return ok({ results: [{ id: 2001 }, { id: 3001 }, { id: 4001 }] });
+    if (u.includes("/discover/movie")) return failDiscoverMovie ? bad() : ok({ results: [{ id: 1001, popularity: 5 }, { id: 1726, popularity: 90 }] });
+    if (u.includes("/discover/tv")) return ok({ results: [{ id: 2001, popularity: 8 }] });
+    if (u.includes("/trending/movie")) return ok({ results: [{ id: 1001, popularity: 5 }, { id: 1002, popularity: 50 }] });
+    if (u.includes("/trending/tv")) return ok({ results: [{ id: 2001, popularity: 8 }, { id: 3001, popularity: 1 }, { id: 4001, popularity: 1 }] });
     if (u.includes("/watch/providers")) return ok({ results: { BD: { flatrate: [{ provider_name: "Netflix" }] }, US: { flatrate: [{ provider_name: "Hulu" }] } } });
     const m = u.match(/\/(movie|tv)\/(\d+)\?/);
     if (m) return ok(DETAILS[m[1] + ":" + m[2]] || {});
@@ -100,6 +100,21 @@ test("second identical run files nothing (idempotent)", async () => {
   assert.equal(Object.keys(pend).length, 4); // 3 new + 1 pre-seeded reject
 });
 
+test("popularity-first ordering across lists", async () => {
+  const kv = makeKV({});
+  globalThis.fetch = cannedFetch();
+  const d = makeDO({ kv });
+  const state0 = { enabled: false, frequency: "daily", sources: { tmdb: true, trending: true, upcoming: false, tvmaze: false }, budget: { maxNewPerRun: 2, maxDetailCalls: 30 }, lastRun: null, totals: { discovered: 0, approved: 0, rejected: 0 }, nextRunAt: null };
+  await kv.put("ext:discovery:state", JSON.stringify(state0));
+  const run = await d.runDiscovery(d.env, "manual");
+  assert.equal(run.counts.newCandidates, 2);
+  const pend = await kvObj(kv, "ext:pending");
+  const filed = Object.values(pend).map((c) => c.tmdb).sort();
+  // 1002 (trending, pop 50) and 2001 (pop 8) beat 1001 (discover, pop 5)
+  // even though discover/movie is fetched first.
+  assert.deepEqual(filed, [1002, 2001]);
+});
+
 test("budget cap: overflow titles wait for the next run", async () => {
   const kv = makeKV({});
   globalThis.fetch = cannedFetch();
@@ -110,8 +125,12 @@ test("budget cap: overflow titles wait for the next run", async () => {
   assert.equal(run1.counts.newCandidates, 2);
   const seen1 = await kvObj(kv, "ext:discovery:seen");
   assert.equal(Object.keys(seen1).filter((k) => seen1[k].status === "pending").length, 2);
-  // The third title is NOT in seen yet — the next run finds it again.
-  assert.ok(!seen1["tv:2001"] || !seen1["movie:1002"]);
+  // Popularity-first: with budget 2 the run files the two most popular
+  // fresh titles (1002 pop 50, 2001 pop 8) — not the first two in list
+  // order (1001 pop 5 would have won under the old date/list order).
+  assert.equal(seen1["movie:1002"].status, "pending");
+  assert.equal(seen1["tv:2001"].status, "pending");
+  assert.ok(!seen1["movie:1001"]);
   state0.budget.maxNewPerRun = 15;
   await kv.put("ext:discovery:state", JSON.stringify(state0));
   const run2 = await d.runDiscovery(d.env, "manual");

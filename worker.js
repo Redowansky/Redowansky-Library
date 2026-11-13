@@ -2269,8 +2269,13 @@ export class TunnelDO {
       const to = ymd(new Date(started));
       const lists = [];
       if (state.sources.tmdb) {
-        lists.push({ via: "tmdb-discover", type: "movie", path: "/discover/movie?primary_release_date.gte=" + from + "&primary_release_date.lte=" + to + "&sort_by=primary_release_date.desc&page=1" });
-        lists.push({ via: "tmdb-discover", type: "tv", path: "/discover/tv?first_air_date.gte=" + from + "&first_air_date.lte=" + to + "&sort_by=first_air_date.desc&page=1" });
+        // Sorted by popularity INSIDE the date window (2026-11-13 fix):
+        // date-desc filled the budget with the most recently ADDED TMDB
+        // entries — mostly obscure docs/indie — while the titles anyone
+        // would actually want sat in the overflow. Popularity-desc picks
+        // the notable recent titles first.
+        lists.push({ via: "tmdb-discover", type: "movie", path: "/discover/movie?primary_release_date.gte=" + from + "&primary_release_date.lte=" + to + "&sort_by=popularity.desc&page=1" });
+        lists.push({ via: "tmdb-discover", type: "tv", path: "/discover/tv?first_air_date.gte=" + from + "&first_air_date.lte=" + to + "&sort_by=popularity.desc&page=1" });
       }
       if (state.sources.trending) {
         lists.push({ via: "tmdb-trending", type: "movie", path: "/trending/movie/week?page=1" });
@@ -2293,7 +2298,7 @@ export class TunnelDO {
           if (wanted.has(key)) continue;
           const s = seen[key];
           if (s && (s.status === "pending" || s.status === "approved" || s.status === "rejected" || s.status === "live-dup" || s.status === "skipped")) { counts.duplicates++; continue; }
-          wanted.set(key, { tmdb, type: L.type, via: L.via });
+          wanted.set(key, { tmdb, type: L.type, via: L.via, popularity: r.popularity || 0 });
         }
       }
       // Second pass: duplicate check against live + queue (covers titles
@@ -2308,6 +2313,10 @@ export class TunnelDO {
       }
       const budget = Math.max(1, Math.min(30, state.budget.maxNewPerRun || 15));
       const detailBudget = Math.max(budget, Math.min(40, state.budget.maxDetailCalls || 30));
+      // Popularity-first across ALL lists (2026-11-13 fix): the budget
+      // takes the most popular fresh titles first, whatever list found
+      // them — a trending hit outranks an obscure new release.
+      fresh.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
       const toFile = fresh.slice(0, budget);
       const newCands = [];
       let detailCalls = 0;
