@@ -256,7 +256,12 @@ test("state read failure does not stick the flag either", async () => {
   kv.get = async (k, fmt) => { if (k === "ext:discovery:state" && !threw) { threw = true; throw new Error("kv boom"); } return origGet(k, fmt); };
   const d = makeDO({ kv });
   const run1 = await d.runDiscovery(d.env, "manual");
-  assert.equal(run1.status, "ok"); // fail-open to defaults, not a stuck flag
+  // SUPERSEDED 2026-11-13 (review item 1): a failed state read used to
+  // fail open to defaults and the run returned "ok" — that let finish()
+  // save defaults over the real config. Now the run aborts as "failed"
+  // with no writes at all; the flag-reset property is unchanged.
+  assert.equal(run1.status, "failed");
+  assert.equal(kv._map.get("ext:discovery:state"), undefined, "no defaults written over the real state");
   const run2 = await d.runDiscovery(d.env, "manual");
   assert.equal(run2.status, "ok"); // flag was reset — otherwise "skipped"
 });
@@ -321,7 +326,7 @@ test("overlap guard: concurrent runs serialize, no double-filing", async () => {
 // A discovery run persists three separate KV keys (queue, seen, state) —
 // not a transaction. These tests fail one write at a time and check the
 // three stores stay consistent (or heal) and a retry never duplicates.
-function makeFailingKV(initial = {}, failPut = null) {
+function makeFailingKV(initial = {}, failPut = null, failGet = null) {
   const kv = makeKV(initial);
   const perKey = {};
   const origPut = kv.put.bind(kv);
@@ -329,6 +334,11 @@ function makeFailingKV(initial = {}, failPut = null) {
     perKey[k] = (perKey[k] || 0) + 1;
     if (failPut && failPut(k, perKey[k])) throw new Error("kv put boom: " + k);
     return origPut(k, v);
+  };
+  const origGet = kv.get.bind(kv);
+  kv.get = async (k, fmt) => {
+    if (failGet && failGet(k)) throw new Error("kv get boom: " + k);
+    return origGet(k, fmt);
   };
   return kv;
 }
@@ -471,4 +481,99 @@ test("R6 manual candidates are not healed or counted", async () => {
   assert.equal(Object.keys(seen).length, 0);
   const st = await stateOf(kv);
   assert.equal(st.totals.discovered, 0);
+});
+
+// ---- Strict recovery reads (review 2026-11-13 item 1) ----
+// getSeen/getDiscoveryState swallow KV errors and return fallbacks.
+// Recovery must NOT treat those fallbacks as data: saving a {} seen-map
+// would erase existing entries, and saving default state would reset
+// the discovery configuration. The reconciler reads everything strict
+// BEFORE any write, so a failed read aborts with zero writes.
+const emptyListsFetch = async () => ({ ok: true, status: 200, json: async () => ({ results: [] }) });
+
+// R7: a failed seen-map read cannot erase existing entries.
+test("R7 seen read fails: recovery writes nothing, existing entries survive", async () => {
+  const kv = makeFailingKV({
+    "ext:pending": { "p-new1": { id: "p-new1", title: "New Film", type: "movie", tmdb: 1003, year: "2026", sources: [], status: "pending", discoveredAt: "2026-11-13T01:00:00.000Z", discoveredVia: "tmdb-discover", createdAt: 1 } },
+    "ext:discovery:seen": {
+      "movie:1001": { type: "movie", tmdb: 1001, title: "Approved One", firstSeen: "2026-11-12", lastSeen: "2026-11-12", status: "approved" },
+      "movie:1002": { type: "movie", tmdb: 1002, title: "Dup One", firstSeen: "2026-11-12", lastSeen: "2026-11-12", status: "live-dup" },
+    },
+  }, null, (k) => k === "ext:discovery:seen");
+  globalThis.fetch = emptyListsFetch;
+  const d = makeDO({ kv });
+  const run = await d.runDiscovery(d.env, "manual");
+  assert.equal(run.status, "failed", "a run that cannot read the seen-map must fail without writing");
+  assert.ok(String(run.error || "").includes("kv get boom"), "failure names the unreadable read");
+  const seen = await kvObj(kv, "ext:discovery:seen");
+  assert.deepEqual(Object.keys(seen).sort(), ["movie:1001", "movie:1002"], "seen-map untouched");
+  assert.equal(seen["movie:1001"].status, "approved");
+  assert.equal(seen["movie:1002"].status, "live-dup");
+  assert.equal(seen["movie:1003"], undefined, "no heal entry written after a failed read");
+  const st = await stateOf(kv);
+  assert.equal(st.totals.discovered, 0, "totals untouched");
+  assert.equal(st.lastRun.status, "failed", "the failed run itself is recorded");
+});
+
+// R8: a failed state read cannot reset discovery settings — and no
+// seen write happens either, because all reads precede all writes.
+test("R8 state read fails: config and history survive, recovery writes nothing", async () => {
+  const kv = makeFailingKV({
+    "ext:pending": { "p-new1": { id: "p-new1", title: "New Film", type: "movie", tmdb: 1003, year: "2026", sources: [], status: "pending", discoveredAt: "2026-11-13T01:00:00.000Z", discoveredVia: "tmdb-discover", createdAt: 1 } },
+    "ext:discovery:seen": {},
+    "ext:discovery:state": {
+      enabled: true, frequency: "weekly",
+      sources: { tmdb: true, trending: true, upcoming: true, tvmaze: false },
+      budget: { maxNewPerRun: 15, maxDetailCalls: 30 },
+      lastRun: { at: "2026-11-13T01:00:00.000Z", trigger: "manual", status: "ok", counts: { fetched: 80, newCandidates: 15, duplicates: 1, skipped: 64, failed: 0 }, durationMs: 100 },
+      lastSuccess: { at: "2026-11-13T01:00:00.000Z", trigger: "manual", counts: {}, durationMs: 100 },
+      totals: { discovered: 5, approved: 1, rejected: 0 },
+      nextRunAt: "2026-11-20T01:00:00.000Z",
+    },
+  }, null, (k) => k === "ext:discovery:state");
+  globalThis.fetch = emptyListsFetch;
+  const d = makeDO({ kv });
+  const run = await d.runDiscovery(d.env, "manual");
+  assert.equal(run.status, "failed", "a run that cannot read its own state must abort without writing");
+  assert.ok(String(run.error || "").includes("discovery state unreadable"), "failure names the unreadable state");
+  const seen = await kvObj(kv, "ext:discovery:seen");
+  assert.equal(Object.keys(seen).length, 0, "no heal write before the failed read");
+  const st = await stateOf(kv);
+  assert.equal(st.enabled, true);
+  assert.equal(st.frequency, "weekly");
+  assert.equal(st.totals.discovered, 5);
+  assert.equal(st.totals.approved, 1);
+  assert.equal(st.lastRun.status, "ok", "last run record intact");
+  assert.ok(st.lastSuccess, "last success intact");
+});
+
+// ---- Recovery accounting (review 2026-11-13 item 2) ----
+// R9: seen recovery succeeds but saving discovery state fails. The
+// healed seen entries are recorded (seen is authoritative) while
+// totals.discovered is not bumped — a documented residual: a retry
+// cannot detect or fix it (no gap remains), so totals stays stale
+// rather than silently misleading.
+test("R9 seen heal ok + state save fails: seen authoritative, totals stale (documented)", async () => {
+  const kv = makeFailingKV({
+    "ext:pending": { "p-new1": { id: "p-new1", title: "New Film", type: "movie", tmdb: 1003, year: "2026", sources: [], status: "pending", discoveredAt: "2026-11-13T01:00:00.000Z", discoveredVia: "tmdb-discover", createdAt: 1 } },
+    "ext:discovery:seen": {},
+  }, (k, n) => k === "ext:discovery:state" && n === 1);
+  globalThis.fetch = emptyListsFetch;
+  const d = makeDO({ kv });
+  const run1 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run1.status, "ok");
+  let seen = await kvObj(kv, "ext:discovery:seen");
+  assert.ok(seen["movie:1003"], "healed entry landed in the seen-map");
+  assert.equal(seen["movie:1003"].status, "pending");
+  let st = await stateOf(kv);
+  assert.equal(st.totals.discovered, 0, "totals bump lost with the state save");
+  assert.equal(st.lastRun.status, "ok", "the run itself still recorded (second save)");
+  const run2 = await d.runDiscovery(d.env, "manual");
+  assert.equal(run2.status, "ok");
+  seen = await kvObj(kv, "ext:discovery:seen");
+  assert.equal(Object.keys(seen).length, 1, "no duplicate heal on retry");
+  st = await stateOf(kv);
+  assert.equal(st.totals.discovered, 0, "totals stays stale after retry — documented, not hidden");
+  const pend = await kvObj(kv, "ext:pending");
+  assert.equal(Object.keys(pend).length, 1, "queue candidate intact");
 });

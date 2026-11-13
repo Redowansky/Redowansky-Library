@@ -565,16 +565,23 @@ async function savePending(env, obj){
 function defaultDiscoveryState(){
   return { enabled: false, frequency: "daily", sources: { tmdb: true, trending: true, upcoming: false, tvmaze: false }, budget: { maxNewPerRun: 15, maxDetailCalls: 30 }, lastRun: null, lastSuccess: null, totals: { discovered: 0, approved: 0, rejected: 0 }, nextRunAt: null };
 }
-async function getDiscoveryState(env){
-  try {
-    const s = await env.DATA_KV.get("ext:discovery:state", "json");
-    if (s && typeof s === "object") {
-      const d = defaultDiscoveryState();
-      return { ...d, ...s, sources: { ...d.sources, ...(s.sources || {}) }, budget: { ...d.budget, ...(s.budget || {}) }, totals: { ...d.totals, ...(s.totals || {}) } };
-    }
-  } catch (e) {}
-  return defaultDiscoveryState();
+function mergeDiscoveryState(s){
+  const d = defaultDiscoveryState();
+  if (s && typeof s === "object") return { ...d, ...s, sources: { ...d.sources, ...(s.sources || {}) }, budget: { ...d.budget, ...(s.budget || {}) }, totals: { ...d.totals, ...(s.totals || {}) } };
+  return d;
 }
+async function getDiscoveryState(env){
+  try { return mergeDiscoveryState(await env.DATA_KV.get("ext:discovery:state", "json")); } catch (e) { return defaultDiscoveryState(); }
+}
+// Strict reads — recovery only. Unlike getPending/getSeen/
+// getDiscoveryState (which swallow KV errors and return fallbacks),
+// these throw, so reconcileDiscoveryState can abort without writing
+// anything when a read fails. A fallback {} or defaults must never be
+// treated as genuine data by recovery: saving them would erase the
+// real seen-map or reset the real discovery configuration.
+async function getPendingStrict(env){ return await env.DATA_KV.get("ext:pending", "json") || {}; }
+async function getSeenStrict(env){ return await env.DATA_KV.get("ext:discovery:seen", "json") || {}; }
+async function getDiscoveryStateStrict(env){ return mergeDiscoveryState(await env.DATA_KV.get("ext:discovery:state", "json")); }
 async function saveDiscoveryState(env, obj){
   await env.DATA_KV.put("ext:discovery:state", JSON.stringify(obj));
 }
@@ -587,14 +594,26 @@ async function saveDiscoveryState(env, obj){
 // seen gets a seen entry in its own status (pending/rejected), and
 // totals.discovered is bumped by the healed count. Safe to run any time:
 // re-running finds no gaps and writes nothing. Never throws.
-// `state` is the caller's in-memory state object — it is kept in sync so
-// a later finish() cannot overwrite the bump with a stale value; the
-// state is re-read fresh before saving so a concurrent admin config
-// change is not clobbered.
+// READ-BEFORE-WRITE (review 2026-11-13 item 1): all three reads use
+// the strict variants and happen BEFORE any write. If any read fails,
+// recovery aborts with 0 and writes nothing — a failed seen read must
+// never erase existing entries, and a failed state read must never
+// reset discovery settings. `state` is the caller's in-memory state
+// object — it is kept in sync so a later finish() cannot overwrite
+// the bump with a stale value; the state is re-read fresh (inside the
+// lock) before saving so a concurrent admin config change is not
+// clobbered.
+// RESIDUAL (item 2): if the seen save lands but the state save fails,
+// the healed entries are recorded (seen is authoritative) but
+// totals.discovered is not bumped — it undercounts by the healed
+// count, and a later run cannot detect or fix that (no gap remains).
+// Totals is a best-effort display counter; queue + seen are
+// authoritative. No KV transaction or atomicity is claimed anywhere.
 async function reconcileDiscoveryState(env, state){
   try {
-    const pend = await getPending(env);
-    const seen = await getSeen(env);
+    const pend = await getPendingStrict(env);
+    const seen = await getSeenStrict(env);
+    const fresh = await getDiscoveryStateStrict(env);
     const today = new Date().toISOString().slice(0, 10);
     let healed = 0;
     for (const c of Object.values(pend)) {
@@ -606,7 +625,6 @@ async function reconcileDiscoveryState(env, state){
     }
     if (!healed) return 0;
     await saveSeen(env, seen);
-    const fresh = await getDiscoveryState(env);
     fresh.totals.discovered = (fresh.totals.discovered || 0) + healed;
     await saveDiscoveryState(env, fresh);
     if (state) state.totals.discovered = fresh.totals.discovered;
@@ -1951,7 +1969,13 @@ export class TunnelDO {
     if (this._discoveryRunning) return { at: runAt, trigger, status: "skipped", counts, durationMs: 0, error: "a run is already in progress" };
     this._discoveryRunning = true;
     try {
-    const state = await getDiscoveryState(env);
+    // Strict state load (review 2026-11-13 item 1): the swallowing
+    // getDiscoveryState() returns defaults on a KV read failure, and
+    // finish() would then SAVE those defaults over the real config.
+    // If the state cannot be read, abort the run before any write.
+    let state;
+    try { state = await getDiscoveryStateStrict(env); }
+    catch (e) { return { at: runAt, trigger, status: "failed", counts, durationMs: Date.now() - started, error: "discovery state unreadable: " + String((e && e.message) || e) }; }
     const finish = async (status, error) => {
       state.lastRun = { at: runAt, trigger, status, counts, durationMs: Date.now() - started, error: error || null };
       if (status === "ok") state.lastSuccess = { at: runAt, trigger, counts: { ...counts }, durationMs: Date.now() - started };
@@ -2052,8 +2076,12 @@ export class TunnelDO {
       // before inserting — a second run that slipped past the overlap
       // guard cannot double-file the same title (hardening 2026-11-13).
       await this._withAdminLock(async () => {
-        const pendNow = await getPending(env);
-        const seenNow = await getSeen(env);
+        // Strict reads (review 2026-11-13 item 1): the swallowing
+        // getPending()/getSeen() return {} on a KV read failure, and
+        // the unconditional saves below would then ERASE the queue /
+        // seen-map. A failed read must fail the run, never a write.
+        const pendNow = await getPendingStrict(env);
+        const seenNow = await getSeenStrict(env);
         const filed = [];
         for (const c of newCands) {
           const k = c.type + ":" + c.tmdb;
@@ -2083,8 +2111,11 @@ export class TunnelDO {
       // Setup failure (state read / TMDB-key read threw, or finish()
       // threw while saving): record a failed run if state is reachable,
       // otherwise return the failure inline. Queue/seen/totals untouched.
+      // Strict re-read (item 1): the swallowing getDiscoveryState()
+      // would return defaults on failure and the save below would then
+      // reset the real config — unreachable state must stay untouched.
       try {
-        const s2 = await getDiscoveryState(env);
+        const s2 = await getDiscoveryStateStrict(env);
         s2.lastRun = { at: runAt, trigger, status: "failed", counts, durationMs: Date.now() - started, error: String((e && e.message) || e) };
         s2.nextRunAt = nextRunAtFor(s2.frequency, started);
         await saveDiscoveryState(env, s2);

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Idempotent partial-write recovery for discovery (review 2026-11-13 item 1).
 
-A discovery run's batch writes are three separate KV PUTs (queue, seen,
-state) — not a transaction. If the queue write lands but the seen write
-fails, candidates sit in ext:pending with no seen entry and the totals
-bump is lost. reconcileDiscoveryState heals that gap from the queue
-itself, using existing candidate IDs / TMDB IDs, and is safe to run any
-time (re-running finds no gaps). Called at the start of every run and in
-the mid-run failure path, both inside the admin lock. Each anchor is
-asserted to occur exactly once.
+One-off local utility — ALREADY APPLIED (commit 827b242). Do NOT re-run:
+its anchors match the pre-reconciler worker.js, so a re-run would fail
+its own assertions. The reconciler has since been revised (strict reads,
+read-before-write, 2026-11-13 review round 5) by direct edits; this file
+is kept as the historical record of the original application. The target
+path is resolved relative to this file so the script is portable between
+the local workspace and a repo checkout.
 """
-P = "/home/hatch/workspace/sia-lab/worker.js"
+from pathlib import Path
+P = str(Path(__file__).resolve().parent / "worker.js")
 src = open(P, encoding="utf-8").read()
 
 def rep(old, new, count=1):

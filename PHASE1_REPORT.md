@@ -20,9 +20,11 @@
 | 2.3 | NOT in public API, homepage, sitemap, or app feed | PASS — /api/movies 10 (browser UA and app UA `RedowanskyLibraryApp` + `X-App-Version: 41`), homepage 0 matches, sitemap 0, direct views 404 |
 | 2.4 | Reject → appears in Rejected tab, stays invisible publicly | PASS |
 | 2.5 | Delete the rejected candidate → disappears | PASS — gone from the queue entirely |
-| 2.6 | Add a candidate with a valid authorized playback source | PASS — Lulustream embed source |
+| 2.6 | Add a candidate with a valid playback source | PASS — Lulustream embed source (syntactically valid URL; authorization of that source was NOT established by this test) |
 | 2.7 | Approve → appears in live catalogue + public API, exactly once | PASS — live entry `emwe657pw7q`, /api/movies 10 → 11, public site modal shows Play + Download |
 | 2.8 | Duplicate detection vs pending and approved entries | PASS — TMDB 1726 approve → 409 dialog "Duplicate of Iron Man (live) — approve anyway?"; form-add "Spider Man" 2026 matched live "Spider-Man" despite the hyphen difference (title normalization); 27/27 unit tests on the deployed duplicate/validation code |
+
+> **Note (2026-11-13):** the Lulustream embed used in 2.6 predates the authorized-sources-only policy adopted in the README (commit 6495d7d). That test verified the URL was valid, not that the source was authorized. Lulustream-embed entries already in the catalogue (Monarch S1) are under review — keep / replace / remove is the owner's call.
 
 ## 3. Failure and security checks
 
