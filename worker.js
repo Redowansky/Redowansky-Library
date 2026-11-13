@@ -534,11 +534,11 @@ function toDirectUrlSrv(u){
   if (u.indexOf("dropbox.com") >= 0 && u.indexOf("dl=0") >= 0) return u.split("?dl=0")[0] + "?raw=1";
   return u;
 }
-async function getExtMovies(env){
-  try { return await env.DATA_KV.get("ext:movies", "json") || {}; } catch(e) { return {}; }
+async function getExtMovies(store){
+  try { return await store.get("ext:movies") || {}; } catch(e) { return {}; }
 }
-async function saveExtMovies(env, obj){
-  await env.DATA_KV.put("ext:movies", JSON.stringify(obj));
+async function saveExtMovies(store, obj){
+  await store.put("ext:movies", obj);
 }
 // ---- Approval queue (Phase 1) ----
 // Pending discoveries live in DATA_KV key "ext:pending" — a SEPARATE key
@@ -588,9 +588,30 @@ async function getSeenStrict(env){
   try { return await env.DATA_KV.get("ext:discovery:seen", "json") || {}; }
   catch (e) { e.code = "KV_READ_FAILED"; throw e; }
 }
-async function getExtMoviesStrict(env){
+async function getExtMoviesStrict(store){
+  let v;
+  try { v = await store.get("ext:movies"); }
+  catch (e) { e.code = "STORE_READ_FAILED"; throw e; }
+  // Fail closed: a missing catalogue key is NOT an empty catalogue.
+  // A legitimately empty catalogue is stored as {} (present). A
+  // missing key means the migration has not seeded DO storage yet,
+  // and every catalogue write must refuse rather than start from {}.
+  if (v == null) { const e = new Error("catalogue not seeded"); e.code = "CATALOGUE_NOT_SEEDED"; throw e; }
+  return v;
+}
+// KV source read for the migration endpoint only. The catalogue no
+// longer lives in KV; this helper reads the pre-migration KV value so
+// the migration endpoint can copy it into DO storage.
+async function getExtMoviesKVStrict(env){
   try { return await env.DATA_KV.get("ext:movies", "json") || {}; }
   catch (e) { e.code = "KV_READ_FAILED"; throw e; }
+}
+// True for every catalogue-read failure the routes treat as "stored
+// data temporarily unreadable": a KV read failure (migration endpoint,
+// discovery config), a DO-storage read failure, or a catalogue that
+// has not been seeded into DO storage yet.
+function isStoreReadFailure(e){
+  return !!e && (e.code === "KV_READ_FAILED" || e.code === "STORE_READ_FAILED" || e.code === "CATALOGUE_NOT_SEEDED");
 }
 async function getDiscoveryStateStrict(env){
   try { return mergeDiscoveryState(await env.DATA_KV.get("ext:discovery:state", "json")); }
@@ -608,7 +629,7 @@ async function saveDiscoveryState(env, obj){
 // a storage failure must abort the write with 500, never proceed).
 async function freezeBlock(state){
   const frozen = state && state.storage ? await state.storage.get("catalogue_frozen") : false;
-  return frozen ? json({ error: "catalogue frozen for migration \— try again later" }, 503) : null;
+  return frozen ? json({ error: "catalogue frozen for migration — try again later" }, 503) : null;
 }
 // Idempotent recovery for partial-write failures (review 2026-11-13).
 // A discovery run persists three separate KV keys (queue, seen, state),
@@ -650,6 +671,8 @@ async function reconcileDiscoveryState(env, state){
   const today = new Date().toISOString().slice(0, 10);
   let healed = 0;
   for (const c of Object.values(pend)) {
+    // F1: metadata-edit proposals are not discovery candidates.
+    if (c && c.kind === "meta") continue;
     if (!c || !c.tmdb || !c.discoveredAt) continue;
     const k = c.type + ":" + c.tmdb;
     if (seen[k]) continue;
@@ -784,6 +807,8 @@ function findDuplicate(cand, liveList, pendObj, excludeId){
   for (const id in (pendObj || {})) {
     if (id === excludeId) continue;
     const m = pendObj[id];
+    // F1: metadata-edit proposals are not publication candidates.
+    if (m && m.kind === "meta") continue;
     if (matchEntry(m)) return { where: "pending", id, title: m.title, tmdb: m.tmdb != null ? m.tmdb : null };
   }
   return null;
@@ -909,8 +934,26 @@ label{display:block;color:var(--mut);font-size:.82rem;margin:14px 0 6px}
 <span id="pendMsg" style="font-size:.85rem"></span>
 </div>
 </div>
+<div style="background:#0a120c;border:1px solid #1e3a2a;border-radius:12px;padding:14px;margin-bottom:16px">
+<h4 style="margin-bottom:10px">✏️ Propose a metadata edit</h4>
+<p class="desc" style="margin-bottom:10px">Change the title or poster of a live entry. Nothing changes until you approve the proposal below — the entry stays exactly as it is until then.</p>
+<div style="display:flex;gap:8px">
+<input id="metaQ" placeholder="Search live entries by title or id…" style="flex:1;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
+<button class="btn" onclick="metaSearch()">Search</button>
+</div>
+<div id="metaResults" style="margin-top:8px"></div>
+<input id="metaTargetId" placeholder="Entry id (or pick from search above)" style="width:100%;margin-top:8px;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
+<div id="metaCurrent" style="margin-top:8px;font-size:.85rem;color:#7a9a85"></div>
+<input id="metaTitle" placeholder="New title (leave blank to keep)" style="width:100%;margin-top:8px;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
+<input id="metaPoster" placeholder="New poster URL (leave blank to keep)" style="width:100%;margin-top:8px;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:10px">
+<div style="display:flex;gap:10px;align-items:center;margin-top:10px">
+<button class="btn" onclick="proposeMeta()">Propose edit</button>
+<span id="metaMsg" style="font-size:.85rem"></span>
+</div>
+</div>
 <div style="display:flex;gap:8px;margin-bottom:12px">
 <button class="btn" id="pendTabP" onclick="pendTab('pending')">⏳ Pending (<span id="pendCountP">0</span>)</button>
+<button class="btn ghost" id="pendTabM" onclick="pendTab('meta')">✏️ Metadata edits (<span id="pendCountM">0</span>)</button>
 <button class="btn ghost" id="pendTabR" onclick="pendTab('rejected')">✖ Rejected (<span id="pendCountR">0</span>)</button>
 </div>
 <div id="pendList"></div>
@@ -967,7 +1010,7 @@ document.querySelectorAll("nav button").forEach(x=>x.classList.remove("on"));b.c
 document.querySelectorAll(".sec").forEach(s=>s.classList.remove("on"));$("s-"+b.dataset.s).classList.add("on");
 if(b.dataset.s==="dash")loadDash();if(b.dataset.s==="files")loadFiles();if(b.dataset.s==="pending")loadPending();if(b.dataset.s==="discovery")loadDiscovery();});
 // ---- Approval queue ----
-let pendTabCur="pending", pendCache={pending:[],rejected:[]};
+let pendTabCur="pending", pendCache={pending:[],meta:[],rejected:[]};
 function pendEsc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
 function pendImgUrl(p){if(!p)return "";var s=String(p);if(/[\\s"'<>]/.test(s))return "";if(s.indexOf("http")===0)return s;if(s.charAt(0)==="/")return "https://image.tmdb.org/t/p/w185"+s;return "";}
 async function loadPending(){
@@ -976,17 +1019,42 @@ async function loadPending(){
   const r=await api("/api/admin/pending?pw="+encodeURIComponent(pw()));
   const d=await r.json().catch(()=>({}));
   if(!r.ok){box.innerHTML="<p style='color:#ff9a9a'>Could not load the queue.</p>";return;}
-  pendCache={pending:d.pending||[],rejected:d.rejected||[]};
+  const all=(d.pending||[]).concat(d.rejected||[]);
+  const pubs=all.filter(function(c){return c.kind!=="meta";});
+  const metas=all.filter(function(c){return c.kind==="meta";});
+  pendCache={pending:pubs.filter(function(c){return c.status==="pending";}),meta:metas.filter(function(c){return c.status==="pending";}),rejected:pubs.filter(function(c){return c.status==="rejected";}).concat(metas.filter(function(c){return c.status==="rejected";}))};
   document.getElementById("pendCountP").textContent=pendCache.pending.length;
+  document.getElementById("pendCountM").textContent=pendCache.meta.length;
   document.getElementById("pendCountR").textContent=pendCache.rejected.length;
   renderPend();
 }
-function pendTab(t){pendTabCur=t;document.getElementById("pendTabP").className=t==="pending"?"btn":"btn ghost";document.getElementById("pendTabR").className=t==="rejected"?"btn":"btn ghost";renderPend();}
+function pendTab(t){pendTabCur=t;document.getElementById("pendTabP").className=t==="pending"?"btn":"btn ghost";document.getElementById("pendTabM").className=t==="meta"?"btn":"btn ghost";document.getElementById("pendTabR").className=t==="rejected"?"btn":"btn ghost";renderPend();}
 function renderPend(){
   const box=document.getElementById("pendList"); if(!box)return;
   const list=pendCache[pendTabCur]||[];
-  if(!list.length){box.innerHTML="<p style='color:#7a9a85;font-size:.85rem'>"+(pendTabCur==="pending"?"Nothing waiting for approval.":"No rejected candidates.")+"</p>";return;}
+  if(!list.length){box.innerHTML="<p style='color:#7a9a85;font-size:.85rem'>"+(pendTabCur==="pending"?"Nothing waiting for approval.":pendTabCur==="meta"?"No metadata edits waiting for approval.":"No rejected candidates.")+"</p>";return;}
   box.innerHTML=list.map(function(c){
+    if(c.kind==="meta"){
+      const ch=c.changes||{};
+      const exp=c.expected||{};
+      const oldT=(exp.title!=null?exp.title:(c.targetTitle||""));
+      const newT=ch.title!=null?ch.title:"";
+      const oldP=(exp.poster!=null?exp.poster:"");
+      const newP=ch.poster!=null?ch.poster:"";
+      const oldPu=pendImgUrl(oldP);const newPu=pendImgUrl(newP);
+      const oldImg=oldPu?("<img src='"+pendEsc(oldPu)+"' style='width:46px;border-radius:6px' onerror='this.remove()'>"):"<span style='color:#7a9a85'>(none)</span>";
+      const newImg=newPu?("<img src='"+pendEsc(newPu)+"' style='width:46px;border-radius:6px' onerror='this.remove()'>"):"<span style='color:#7a9a85'>(none)</span>";
+      const fieldList=[ch.title!=null?"Title":null,ch.poster!=null?"Poster":null].filter(Boolean).join(" + ");
+      const det="<div id='pd-"+c.id+"' style='display:none;margin-top:8px;padding:10px;background:#060906;border-radius:8px;font-size:.85rem;line-height:1.6'>"
+        +"<div><b>Target:</b> "+pendEsc(c.targetId||"")+" — "+pendEsc(c.targetTitle||"")+" · "+new Date(c.createdAt||0).toLocaleString()+"</div>"
+        +(ch.title!=null?"<div style='margin-top:6px'><b>Title:</b> "+pendEsc(oldT)+" → <b>"+pendEsc(newT)+"</b></div>":"")
+        +(ch.poster!=null?"<div style='margin-top:6px'><b>Poster:</b><div style='display:flex;gap:12px;align-items:center;margin-top:4px'><span>Current<br>"+oldImg+"</span><span>Proposed<br>"+newImg+"</span></div></div>":"")
+        +"</div>";
+      const btns=pendTabCur==="meta"
+        ?"<button class='btn' style='padding:6px 14px;font-size:.8rem' data-id='"+c.id+"' onclick='approvePending(this)'>✓ Approve edit</button><button class='btn' style='padding:6px 14px;font-size:.8rem' data-id='"+c.id+"' onclick='rejectPending(this)'>✖ Reject</button>"
+        :"";
+      return "<div style='padding:10px;background:#0a120c;border:1px solid #1e3a2a;border-radius:10px;margin-bottom:8px'><div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap'><span style='font-size:.95rem'>✏️ <b>Metadata edit</b></span><span style='flex:1;font-size:.85rem;color:#7a9a85;min-width:140px'>"+pendEsc(fieldList)+" · "+pendEsc(c.targetTitle||"")+"</span><button class='btn ghost' style='padding:6px 12px;font-size:.8rem' data-id='"+c.id+"' onclick='togglePend(this)'>Inspect</button>"+btns+"<button class='btn danger' style='padding:6px 12px;font-size:.8rem' data-id='"+c.id+"' onclick='deletePending(this)'>Delete</button></div>"+det+"</div>";
+    }
     const pu=pendImgUrl(c.poster);const poster=pu?("<img src='"+pendEsc(pu)+"' style='width:46px;border-radius:6px' onerror='this.remove()'>"):"";
     const srcs=(c.sources||[]).map(function(s){return "<div style='font-size:.82rem;color:#7a9a85'>🔗 "+pendEsc(s.label||"Source")+" — "+pendEsc(s.url)+"</div>";}).join("");
     const srcRows=(c.sources||[]).map(function(s){return "<div class='psrow' style='display:flex;gap:6px;margin-bottom:6px'><input class='pslabel' placeholder='Label' value='"+pendEsc(s.label||"")+"' style='width:80px;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:8px'><input class='psurl' placeholder='Paste playback URL…' value='"+pendEsc(s.url||"")+"' style='flex:1;background:#060906;border:1px solid #1e3a2a;color:#fff;border-radius:8px;padding:8px'><button class='btn danger' style='padding:6px 10px;font-size:.8rem' onclick='delPendSrcRow(this)'>✕</button></div>";}).join("");
@@ -1021,11 +1089,53 @@ async function addPending(force){
   msg.innerHTML='<span class="bad">✗ '+(d.error||"failed")+'</span>';
 }
 async function approvePending(btn){const id=btn.dataset.id;
+  const cand=(pendCache.meta||[]).concat(pendCache.rejected||[]).find(function(c){return c.id===id;});
+  const isMeta=!!(cand&&cand.kind==="meta");
   const r=await api("/api/admin/pending/approve?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});
   const d=await r.json().catch(()=>({}));
-  if(r.ok){alert("✓ Published: "+(d.title||"")+(d.already?" (was already live)":"")+(d.pendingCleanup?" — note: the queue entry could not be removed, tap Approve again to clear it":"")+" — now live at /view/ext/"+d.id);loadPending();return;}
-  if(r.status===409&&d.duplicate){if(confirm("Duplicate of "+(d.duplicate.title||"an existing entry")+" ("+(d.duplicate.where||"")+") — approve anyway?")){const r2=await api("/api/admin/pending/approve?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id,force:true})});const d2=await r2.json().catch(()=>({}));if(r2.ok){alert("✓ Published: "+(d2.title||"")+" — now live at /view/ext/"+d2.id);loadPending();}else alert("✗ "+(d2.error||"failed"));}return;}
+  if(r.ok){
+    if(isMeta){alert("✓ Updated: "+(d.title||"")+" — metadata changed on the existing entry"+(d.already?" (already applied)":"")+(d.pendingCleanup?" — note: the queue entry could not be removed, tap Approve again to clear it":""));}
+    else{alert("✓ Published: "+(d.title||"")+(d.already?" (was already live)":"")+(d.pendingCleanup?" — note: the queue entry could not be removed, tap Approve again to clear it":"")+" — now live at /view/ext/"+d.id);}
+    loadPending();return;
+  }
+  if(r.status===409&&d.error==="stale proposal"){alert("This edit is out of date — the entry changed since the proposal was made. Delete it and propose again.");loadPending();return;}
+  if(r.status===409&&d.duplicate){if(confirm("Duplicate of "+(d.duplicate.title||"an existing entry")+" ("+(d.duplicate.where||"")+") — approve anyway?")){const r2=await api("/api/admin/pending/approve?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id,force:true})});const d2=await r2.json().catch(()=>({}));if(r2.ok){if(isMeta){alert("✓ Updated: "+(d2.title||"")+" — metadata changed on the existing entry");}else{alert("✓ Published: "+(d2.title||"")+" — now live at /view/ext/"+d2.id);}loadPending();}else alert("✗ "+(d2.error||"failed"));}return;}
   alert("✗ "+(d.error||"failed"));
+}
+async function metaSearch(){
+  const q=document.getElementById("metaQ").value.trim();
+  const box=document.getElementById("metaResults");
+  box.innerHTML="<span style='color:#7a9a85'>searching…</span>";
+  const r=await api("/api/admin/entries?q="+encodeURIComponent(q)+"&pw="+encodeURIComponent(pw()));
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){box.innerHTML="<span style='color:#ff9a9a'>✗ "+(d.error||"failed")+"</span>";return;}
+  const list=d.entries||[];
+  if(!list.length){box.innerHTML="<span style='color:#7a9a85'>No matching entries.</span>";return;}
+  box.innerHTML=list.map(function(e){
+    return "<div style='padding:8px;background:#060906;border:1px solid #1e3a2a;border-radius:8px;margin-bottom:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap'><span style='flex:1;font-size:.9rem'><b>"+pendEsc(e.title)+"</b> <span style='color:#7a9a85'>"+pendEsc(e.id)+" · "+pendEsc(e.type)+(e.unlisted?" · unlisted":"")+"</span></span><button class='btn' style='padding:4px 12px;font-size:.8rem' data-id='"+pendEsc(e.id)+"' data-title='"+pendEsc(e.title)+"' onclick='metaPick(this)'>Use this entry</button></div>";
+  }).join("");
+}
+function metaPick(btn){
+  document.getElementById("metaTargetId").value=btn.dataset.id;
+  document.getElementById("metaCurrent").textContent="Editing: "+btn.dataset.title+" ("+btn.dataset.id+")";
+  document.getElementById("metaTitle").value="";
+  document.getElementById("metaPoster").value="";
+}
+async function proposeMeta(){
+  const msg=document.getElementById("metaMsg");
+  const targetId=document.getElementById("metaTargetId").value.trim();
+  if(!targetId){msg.innerHTML='<span class="bad">Pick an entry first (search above, or paste its id)</span>';return;}
+  const changes={};
+  const t=document.getElementById("metaTitle").value.trim();
+  const p=document.getElementById("metaPoster").value.trim();
+  if(t)changes.title=t;
+  if(p)changes.poster=p;
+  if(!Object.keys(changes).length){msg.innerHTML='<span class="bad">Change the title or the poster (or both)</span>';return;}
+  msg.textContent="proposing…";
+  const r=await api("/api/admin/pending/meta?pw="+encodeURIComponent(pw()),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({targetId,changes})});
+  const d=await r.json().catch(()=>({}));
+  if(r.ok){msg.innerHTML='<span class="ok">✓ proposed — review it under Metadata edits below</span>';document.getElementById("metaTargetId").value="";document.getElementById("metaCurrent").textContent="";document.getElementById("metaTitle").value="";document.getElementById("metaPoster").value="";document.getElementById("metaResults").innerHTML="";loadPending();return;}
+  msg.innerHTML='<span class="bad">✗ '+(d.error||"failed")+'</span>';
 }
 async function rejectPending(btn){const id=btn.dataset.id;
   if(!confirm("Reject this candidate? It stays in the Rejected list and never appears publicly."))return;
@@ -1968,14 +2078,17 @@ export class TunnelDO {
         }
       }
     }
-    // External movies (linked, not hosted) - from KV (survives deploys)
+    // External movies (linked, not hosted) - from DO storage (strongly
+    // consistent; survives deploys). A missing catalogue is a hard
+    // failure, never an empty list: the public feed must fail closed
+    // rather than silently drop the catalogue.
     try {
-      const extObj = opts.strictExt ? await getExtMoviesStrict(env) : await getExtMovies(env);
+      const extObj = opts.strictExt ? await getExtMoviesStrict(this.state.storage) : await getExtMovies(this.state.storage);
       // unlisted entries stay reachable via their direct /view/ext/<id>
       // URL (used to verify embed players) but are kept out of the home
       // catalog and the app feed until explicitly published.
       for (const id in extObj) { if (extObj[id].unlisted) continue; movies.push({ ...extObj[id], external: true }); }
-    } catch (e) { if (opts.strictExt) throw e; }
+    } catch (e) { if (opts.strictExt || e.code === "CATALOGUE_NOT_SEEDED") throw e; }
     return movies;
   }
 
@@ -2413,7 +2526,7 @@ export class TunnelDO {
         // Resolve a site resume link for app entries that only carry a catalog id.
         if (!rec.viewUrl && id) {
           try {
-            const ext = await getExtMovies(env);
+            const ext = await getExtMovies(this.state.storage);
             if (ext[id]) rec.viewUrl = "/view/ext/" + id;
           } catch {}
         }
@@ -2657,29 +2770,24 @@ export class TunnelDO {
         try {
           return await this._withAdminLock(async () => {
           const fb = await freezeBlock(this.state); if (fb) return fb;
-          const id = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
-          const extObj = await getExtMoviesStrict(env);
-          extObj[id] = { id, url: video_url, sources: srcList, ...meta };
-          await saveExtMovies(env, extObj);
-          return json({ ok: true, id, title: meta.title });
+          // F1: this route no longer publishes. It is a pending-submission
+          // alias of POST /api/admin/pending -- it validates like a
+          // submission, writes a candidate to ext:pending, and returns
+          // the pending id. Publication still requires a separate
+          // approve. Nothing is written to ext:movies here, and the
+          // candidate never carries a pendingId.
+          const cand = { id: "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), sources: srcList, discoveredVia: "manual", note: "", status: "pending", createdAt: Date.now(), ...meta };
+          const dup = findDuplicate(cand, await this.listMovies(env, { strictExt: true }), await getPendingStrict(env), null);
+          if (dup && !body.force) return json({ error: "duplicate", duplicate: dup }, 409);
+          const pend = await getPendingStrict(env);
+          pend[cand.id] = cand;
+          await savePending(env, pend);
+          return json({ ok: true, id: cand.id, title: cand.title, duplicate: dup || null, queued: true });
           });
         } catch (e) {
-          if (e && e.code === "KV_READ_FAILED") return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          if (e && isStoreReadFailure(e)) return json({ error: "stored data temporarily unreadable — try again" }, 500);
           return json({ error: "operation failed — try again" }, 500);
         }
-      }
-      // Admin: set poster on an external entry
-      if (path === "/api/admin/extposter" && request.method === "POST") {
-        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
-        const { id, poster } = await request.json();
-        return this._withAdminLock(async () => {
-          const fb = await freezeBlock(this.state); if (fb) return fb;
-          const extObj = await getExtMovies(env);
-          if (!extObj[id]) return json({ error: "not found" }, 404);
-          extObj[id].poster = cleanImgUrl(poster);
-          await saveExtMovies(env, extObj);
-          return json({ ok: true });
-        });
       }
       // Admin: publish/unpublish an external entry (flip unlisted).
       // Lets an embed entry into the home catalog + app feed (listed)
@@ -2687,24 +2795,38 @@ export class TunnelDO {
       if (path === "/api/admin/extpublish" && request.method === "POST") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         const { id, unlisted } = await request.json();
-        return this._withAdminLock(async () => {
+        try {
+          return await this._withAdminLock(async () => {
           const fb = await freezeBlock(this.state); if (fb) return fb;
-          const extObj = await getExtMovies(env);
+          const extObj = await getExtMoviesStrict(this.state.storage);
           if (!extObj[id]) return json({ error: "not found" }, 404);
+          // F1 provenance guard (listing branch only): an entry may be
+          // made public only if it carries a pendingId assigned by the
+          // successful server-side approval path. The regex is a format
+          // sanity check only -- it is not proof of provenance. Hiding
+          // (unlisted: true) is the safe direction and is never blocked.
+          if (!unlisted) {
+            const pid = extObj[id].pendingId;
+            if (!(typeof pid === "string" && /^p[0-9a-z]{8,13}$/.test(pid))) return json({ error: "not approved — re-approve via the queue" }, 400);
+          }
           extObj[id].unlisted = !!unlisted;
-          await saveExtMovies(env, extObj);
+          await saveExtMovies(this.state.storage, extObj);
           return json({ ok: true, id, unlisted: extObj[id].unlisted });
-        });
+          });
+        } catch (e) {
+          if (e && isStoreReadFailure(e)) return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          return json({ error: "operation failed — try again" }, 500);
+        }
       }
-      // Admin: pull title + thumbnail from YouTube for an external entry
+      // Admin: YouTube title + thumbnail lookup (F1: read-only). Given a
+      // YouTube URL, returns { title, poster } from oEmbed. Writes
+      // nothing -- the admin uses the returned values to submit a metadata
+      // proposal (POST /api/admin/pending/meta) if they want them.
       if (path === "/api/admin/ytinfo" && request.method === "POST") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
-        return this._withAdminLock(async () => {
-        const fb = await freezeBlock(this.state); if (fb) return fb;
-        const { id, url: yturl } = await request.json();
-        const extObj = await getExtMovies(env);
-        if (!extObj[id]) return json({ error: "not found" }, 404);
-        const u = yturl || "";
+        let body = {};
+        try { body = await request.json(); } catch (e) {}
+        const u = (body.url || body.video_url || "");
         let vid = null, i = -1;
         i = u.indexOf("youtu.be/"); if (i >= 0) vid = u.slice(i + 9).split(/[/?#]/)[0];
         if (!vid) { i = u.indexOf("v="); if (i >= 0) vid = u.slice(i + 2).split(/[&#]/)[0]; }
@@ -2713,11 +2835,7 @@ export class TunnelDO {
         const oe = await fetch("https://www.youtube.com/oembed?url=" + encodeURIComponent("https://www.youtube.com/watch?v=" + vid) + "&format=json");
         if (!oe.ok) return json({ error: "YouTube lookup failed" }, 502);
         const info = await oe.json().catch(() => ({}));
-        if (info.title) extObj[id].title = info.title;
-        extObj[id].poster = "https://img.youtube.com/vi/" + vid + "/hqdefault.jpg";
-        await saveExtMovies(env, extObj);
-        return json({ ok: true, title: extObj[id].title, poster: extObj[id].poster });
-        });
+        return json({ ok: true, title: info.title || null, poster: "https://img.youtube.com/vi/" + vid + "/hqdefault.jpg" });
       }
       // Admin: delete external movie link
       if (path === "/api/admin/external" && request.method === "DELETE") {
@@ -2726,13 +2844,13 @@ export class TunnelDO {
         try {
           return await this._withAdminLock(async () => {
           const fb = await freezeBlock(this.state); if (fb) return fb;
-          const extObj = await getExtMoviesStrict(env);
+          const extObj = await getExtMoviesStrict(this.state.storage);
           delete extObj[id];
-          await saveExtMovies(env, extObj);
+          await saveExtMovies(this.state.storage, extObj);
           return json({ ok: true });
           });
         } catch (e) {
-          if (e && e.code === "KV_READ_FAILED") return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          if (e && isStoreReadFailure(e)) return json({ error: "stored data temporarily unreadable — try again" }, 500);
           return json({ error: "operation failed — try again" }, 500);
         }
       }
@@ -2744,6 +2862,36 @@ export class TunnelDO {
         const pend = await getPending(env);
         const all = Object.values(pend).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         return json({ ok: true, pending: all.filter(c => c.status === "pending"), rejected: all.filter(c => c.status === "rejected") });
+      }
+      // Admin: look up catalogue entries by id prefix or title substring.
+      // F1: used by the admin UI to find a target for a metadata proposal.
+      // Includes unlisted entries (the public feed does not). Authentication
+      // protected, strict read only (an unreadable catalogue is a 500, not
+      // an empty list), no-store, at most 100 results, exactly 7 fields
+      // per entry -- the raw pendingId is never returned.
+      if (path === "/api/admin/entries" && request.method === "GET") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        const q = (url.searchParams.get("q") || "");
+        if (q.length > 100) return json({ error: "query too long (max 100 chars)" }, 400);
+        try {
+          const extObj = await getExtMoviesStrict(this.state.storage);
+          const needle = q.trim().toLowerCase();
+          const out = [];
+          for (const e of Object.values(extObj)) {
+            if (!e || !e.id) continue;
+            if (needle) {
+              const idHit = String(e.id).toLowerCase().startsWith(needle);
+              const titleHit = e.title && String(e.title).toLowerCase().indexOf(needle) >= 0;
+              if (!idHit && !titleHit) continue;
+            }
+            out.push({ id: e.id, title: e.title || "", type: e.type || "movie", tmdb: e.tmdb != null ? e.tmdb : null, unlisted: !!e.unlisted, hasPendingId: typeof e.pendingId === "string" && e.pendingId.length > 0, poster: e.poster || null });
+            if (out.length >= 100) break;
+          }
+          return new Response(JSON.stringify({ ok: true, entries: out }), { status: 200, headers: { "content-type": "application/json", "Cache-Control": "no-store" } });
+        } catch (e) {
+          if (e && isStoreReadFailure(e)) return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          return json({ error: "operation failed — try again" }, 500);
+        }
       }
       // Add a candidate to the queue. Duplicate (TMDB id, else title+year)
       // against the live catalogue AND the queue -> 409 unless force:true.
@@ -2776,18 +2924,67 @@ export class TunnelDO {
           return json({ ok: true, id: cand.id, title: cand.title, duplicate: dup || null });
           });
         } catch (e) {
-          if (e && e.code === "KV_READ_FAILED") return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          if (e && isStoreReadFailure(e)) return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          return json({ error: "operation failed — try again" }, 500);
+        }
+      }
+      // Propose a metadata change (title and/or poster) for a live entry.
+      // F1: the change is a proposal in the existing queue -- it is NOT
+      // applied until POST /api/admin/pending/approve approves it. The
+      // `expected` values are captured server-side from a strict read
+      // inside the lock; any `expected` in the request body is ignored.
+      // Sources are never editable through this mechanism.
+      if (path === "/api/admin/pending/meta" && request.method === "POST") {
+        if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
+        let body = {};
+        try { body = await request.json(); } catch (e) {}
+        const targetId = (body.targetId || "").toString();
+        if (!targetId) return json({ error: "need targetId" }, 400);
+        if (body.sources != null) return json({ error: "sources are not editable via a metadata proposal" }, 400);
+        const rawChanges = body.changes && typeof body.changes === "object" ? body.changes : {};
+        if (rawChanges.sources != null) return json({ error: "sources are not editable via a metadata proposal" }, 400);
+        const changes = {};
+        if (rawChanges.title != null) {
+          const t = String(rawChanges.title).trim();
+          if (!t) return json({ error: "title must not be empty" }, 400);
+          if (t.length > 200) return json({ error: "title too long (max 200 chars)" }, 400);
+          changes.title = t;
+        }
+        if (rawChanges.poster != null) {
+          const p = cleanImgUrl(rawChanges.poster);
+          if (!p) return json({ error: "invalid poster URL" }, 400);
+          changes.poster = p;
+        }
+        if (!Object.keys(changes).length) return json({ error: "no changes" }, 400);
+        try {
+          return await this._withAdminLock(async () => {
+          const extObj = await getExtMoviesStrict(this.state.storage);
+          const target = extObj[targetId];
+          if (!target) return json({ error: "target entry not found" }, 404);
+          const expected = {};
+          if (changes.title != null) expected.title = target.title || "";
+          if (changes.poster != null) expected.poster = target.poster || null;
+          const proposal = { id: "pm" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), kind: "meta", targetId, targetTitle: target.title || "", changes, expected, status: "pending", createdAt: Date.now() };
+          const pend = await getPendingStrict(env);
+          pend[proposal.id] = proposal;
+          await savePending(env, pend);
+          return json({ ok: true, id: proposal.id, targetId, targetTitle: proposal.targetTitle, changes });
+          });
+        } catch (e) {
+          if (e && isStoreReadFailure(e)) return json({ error: "stored data temporarily unreadable — try again" }, 500);
           return json({ error: "operation failed — try again" }, 500);
         }
       }
       // Approve a candidate: publish it into the live catalogue through
-      // the existing ext-entry shape (same fields /api/admin/external
-      // writes, listed immediately — no unlisted flag). Idempotent: if
-      // this candidate was already published, the existing live entry is
-      // returned and nothing is duplicated. Requires >= 1 source, so an
-      // approved entry always has the same shape as today's live entries
-      // (metadata-only catalogue entries are a later phase — the app has
-      // no empty-player state for them yet).
+      // the existing ext-entry shape (same fields the legacy external
+      // route used to write, listed immediately — no unlisted flag).
+      // Idempotent: if this candidate was already published, the
+      // existing live entry is returned and nothing is duplicated.
+      // Requires >= 1 source, so an approved entry always has the same
+      // shape as today's live entries (metadata-only catalogue entries
+      // are a later phase — the app has no empty-player state for them
+      // yet). F1: also approves metadata-edit proposals (kind "meta"),
+      // which change an existing entry in place and never publish.
       if (path === "/api/admin/pending/approve" && request.method === "POST") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         let body = {};
@@ -2799,17 +2996,71 @@ export class TunnelDO {
           const pend = await getPendingStrict(env);
           const cand = pend[id];
           if (!cand) {
-            const extObj0 = await getExtMoviesStrict(env);
+            const extObj0 = await getExtMoviesStrict(this.state.storage);
             for (const k in extObj0) if (extObj0[k].pendingId === id) return json({ ok: true, id: k, title: extObj0[k].title, already: true });
             return json({ error: "not found" }, 404);
           }
+          // F1: metadata-edit proposals branch here, before the entry
+          // flow. A meta proposal never publishes, never touches the
+          // seen-map or the discovery totals, and never grants
+          // publication provenance (no pendingId is assigned).
+          if (cand.kind === "meta") {
+            if (cand.status !== "pending") return json({ error: "not pending (status: " + cand.status + ")" }, 400);
+            const extObj = await getExtMoviesStrict(this.state.storage);
+            const target = extObj[cand.targetId];
+            if (!target) return json({ error: "target entry not found" }, 404);
+            const changes = cand.changes || {};
+            const expected = cand.expected || {};
+            const fields = Object.keys(changes);
+            if (!fields.length) return json({ error: "no changes" }, 400);
+            if (changes.title != null) {
+              const t = String(changes.title).trim();
+              if (!t) return json({ error: "title must not be empty" }, 400);
+              if (t.length > 200) return json({ error: "title too long (max 200 chars)" }, 400);
+            }
+            if (changes.poster != null && !cleanImgUrl(changes.poster)) return json({ error: "invalid poster URL" }, 400);
+            if (changes.title != null) {
+              const nt = normTitle(changes.title);
+              for (const k in extObj) {
+                if (k === cand.targetId) continue;
+                const m = extObj[k];
+                if (m && m.title && normTitle(m.title) === nt) return json({ error: "duplicate", duplicate: { where: "live", id: m.id || k, title: m.title, tmdb: m.tmdb != null ? m.tmdb : null } }, 409);
+              }
+            }
+            let allApplied = true;
+            let conflict = null;
+            const toApply = {};
+            for (const f of fields) {
+              const cur = target[f];
+              const exp = expected[f];
+              const prop = changes[f];
+              if (cur === prop) { /* already at the proposed value; leave it */ }
+              else if (cur === exp) { toApply[f] = prop; allApplied = false; }
+              else { conflict = { field: f, current: cur }; break; }
+            }
+            if (conflict) return json({ error: "stale proposal", field: conflict.field, current: conflict.current }, 409);
+            if (allApplied) {
+              delete pend[id];
+              let cleanupOk = true;
+              try { await savePending(env, pend); } catch (e) { cleanupOk = false; }
+              return json({ ok: true, id: cand.targetId, title: target.title, already: true, ...(cleanupOk ? {} : { pendingCleanup: "failed" }) });
+            }
+            for (const f in toApply) target[f] = toApply[f];
+            target.metaUpdatedAt = Date.now();
+            await saveExtMovies(this.state.storage, extObj);
+            delete pend[id];
+            let cleanupOk = true;
+            try { await savePending(env, pend); } catch (e) { cleanupOk = false; }
+            return json({ ok: true, id: cand.targetId, title: target.title, ...(cleanupOk ? {} : { pendingCleanup: "failed" }) });
+          }
+          if (cand.kind && cand.kind !== "entry") return json({ error: "unknown proposal kind" }, 400);
           // Partial-failure self-heal: a previous approve may have saved
           // the live entry but died before deleting the candidate. The
           // duplicate check below would 409 on the entry we just
           // published (same TMDB/title) — detect it first, drop the stale
           // queue entry, and report the existing live entry instead of
           // duplicating it.
-          const extObjPre = await getExtMoviesStrict(env);
+          const extObjPre = await getExtMoviesStrict(this.state.storage);
           for (const k in extObjPre) if (extObjPre[k].pendingId === id) {
             delete pend[id];
             let cleanupOk = true;
@@ -2825,9 +3076,9 @@ export class TunnelDO {
           const dup = findDuplicate(cand, await this.listMovies(env, { strictExt: true }), pend, id);
           if (dup && !body.force) return json({ error: "duplicate", duplicate: dup }, 409);
           const liveId = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
-          const extObj = await getExtMoviesStrict(env);
+          const extObj = await getExtMoviesStrict(this.state.storage);
           extObj[liveId] = { id: liveId, pendingId: id, url: cleanSources[0].url, sources: cleanSources, title: cand.title, year: cand.year || null, overview: cand.overview || null, poster: cleanImgUrl(cand.poster), backdrop: cleanImgUrl(cand.backdrop), vote: cand.vote || null, genres: cand.genres || [], type: cand.type || "movie", tmdb: cand.tmdb || null };
-          await saveExtMovies(env, extObj);
+          await saveExtMovies(this.state.storage, extObj);
           delete pend[id];
           let cleanupOk = true;
           try { await savePending(env, pend); } catch (e) { cleanupOk = false; }
@@ -2836,7 +3087,7 @@ export class TunnelDO {
           return json({ ok: true, id: liveId, title: cand.title, ...(cleanupOk ? {} : { pendingCleanup: "failed" }) });
           });
         } catch (e) {
-          if (e && e.code === "KV_READ_FAILED") return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          if (e && isStoreReadFailure(e)) return json({ error: "stored data temporarily unreadable — try again" }, 500);
           return json({ error: "operation failed — try again" }, 500);
         }
       }
@@ -2856,8 +3107,12 @@ export class TunnelDO {
           cand.status = "rejected";
           cand.rejectedAt = Date.now();
           await savePending(env, pend);
-          await markSeen(env, cand, "rejected");
-          await bumpDiscoveryTotal(env, "rejected");
+          // F1: metadata-edit proposals are not discovery candidates, so
+          // rejecting one must not touch the seen-map or the totals.
+          if (cand.kind !== "meta") {
+            await markSeen(env, cand, "rejected");
+            await bumpDiscoveryTotal(env, "rejected");
+          }
           return json({ ok: true, id, status: "rejected" });
         });
       }
@@ -2876,7 +3131,8 @@ export class TunnelDO {
           // Deleted candidates are marked "skipped" in the seen-map so
           // discovery does not re-file them; a manual re-add still works
           // (the add form checks live + queue only, not the seen-map).
-          await markSeen(env, gone, "skipped");
+          // F1: a metadata-edit proposal is not a discovery candidate.
+          if (gone.kind !== "meta") await markSeen(env, gone, "skipped");
           return json({ ok: true, id });
         });
       }
@@ -2898,6 +3154,7 @@ export class TunnelDO {
           const pend = await getPending(env);
           const cand = pend[id];
           if (!cand) return json({ error: "not found" }, 404);
+          if (cand.kind === "meta") return json({ error: "meta proposals have no sources" }, 400);
           if (cand.status !== "pending") return json({ error: "not pending (status: " + cand.status + ")" }, 400);
           const clean = [];
           for (let i = 0; i < body.sources.length; i++) {
@@ -2969,7 +3226,7 @@ export class TunnelDO {
             return json({ ok: true, state: cur });
           });
         } catch (e) {
-          if (e && e.code === "KV_READ_FAILED") return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          if (e && isStoreReadFailure(e)) return json({ error: "stored data temporarily unreadable — try again" }, 500);
           return json({ error: "operation failed — try again" }, 500);
         }
       }
@@ -2981,7 +3238,7 @@ export class TunnelDO {
       if (path === "/api/admin/catalogue-freeze" && request.method === "GET") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         let frozen = false;
-        try { frozen = !!(await this.state.storage.get("catalogue_frozen")); } catch (e) { return json({ error: "stored data temporarily unreadable \— try again" }, 500); }
+        try { frozen = !!(await this.state.storage.get("catalogue_frozen")); } catch (e) { return json({ error: "stored data temporarily unreadable — try again" }, 500); }
         return json({ ok: true, frozen });
       }
       if (path === "/api/admin/catalogue-freeze" && request.method === "POST") {
@@ -2989,7 +3246,7 @@ export class TunnelDO {
         let body = {};
         try { body = await request.json(); } catch (e) {}
         const frozen = body.frozen === true;
-        try { await this.state.storage.put("catalogue_frozen", frozen); } catch (e) { return json({ error: "operation failed \— try again" }, 500); }
+        try { await this.state.storage.put("catalogue_frozen", frozen); } catch (e) { return json({ error: "operation failed — try again" }, 500); }
         return json({ ok: true, frozen });
       }
       // Admin: one-time catalogue migration (KV -> DO storage).
@@ -3008,7 +3265,7 @@ export class TunnelDO {
           if (!frozen) return json({ error: "catalogue must be frozen before migration" }, 400);
           const existing = await this.state.storage.get("ext:movies");
           if (existing != null) return json({ error: "catalogue already migrated" }, 409);
-          const kvCat = await getExtMoviesStrict(env);
+          const kvCat = await getExtMoviesKVStrict(env);
           const count = Object.keys(kvCat).length;
           const hash = await sha256Hex(te.encode(JSON.stringify(kvCat)));
           await this.state.storage.put("ext:movies", kvCat);
@@ -3019,8 +3276,8 @@ export class TunnelDO {
           return json({ ok: true, count, sha256: hash, verified: true });
           });
         } catch (e) {
-          if (e && e.code === "KV_READ_FAILED") return json({ error: "stored data temporarily unreadable \— try again" }, 500);
-          return json({ error: "operation failed \— try again" }, 500);
+          if (e && isStoreReadFailure(e)) return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          return json({ error: "operation failed — try again" }, 500);
         }
       }
       // Admin: change password (stored in DO storage, survives deploys)
@@ -3251,7 +3508,7 @@ export class TunnelDO {
         return json({ error: "read-only" }, 403);
       if (path.startsWith("/view/ext/") && request.method === "GET") {
         const id = decodeURIComponent(path.split("/")[3] || "");
-        const extObj = await getExtMovies(env);
+        const extObj = await getExtMovies(this.state.storage);
         const m = extObj[id];
         if (!m) return new Response("not found", { status: 404 });
         return this.pageResp(await EXT_VIEW_PAGE(m, env), request);
@@ -3263,7 +3520,7 @@ export class TunnelDO {
       }
       if (path.startsWith("/download/ext/") && request.method === "GET") {
         const id = decodeURIComponent(path.split("/")[3] || "");
-        const extObj = await getExtMovies(env);
+        const extObj = await getExtMovies(this.state.storage);
         const m = extObj[id];
         if (!m) return new Response("not found", { status: 404 });
         const srcs = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
@@ -3332,7 +3589,7 @@ export class TunnelDO {
         if (!tv || !tv.success) return json({ error: "human check failed — refresh and try again" }, 403);
         let target = null;
         if (desc.kind === "ext") {
-          const extObj = await getExtMovies(env);
+          const extObj = await getExtMovies(this.state.storage);
           const m = extObj[desc.id];
           if (!m) return json({ error: "not found" }, 404);
           const srcs = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
@@ -3358,7 +3615,7 @@ export class TunnelDO {
         try { t = JSON.parse(decodeURIComponent(escape(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))))); } catch (e) { return new Response("bad link", { status: 400 }); }
         if (!t.exp || t.exp < Math.floor(Date.now() / 1000)) return new Response("link expired — go back and click download again", { status: 410 });
         if (t.kind === "ext") {
-          const extObj = await getExtMovies(env);
+          const extObj = await getExtMovies(this.state.storage);
           const m = extObj[t.id];
           if (!m) return new Response("not found", { status: 404 });
           const srcs = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
@@ -3395,7 +3652,7 @@ export class TunnelDO {
         try { t = JSON.parse(decodeURIComponent(escape(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))))); } catch (e) { return new Response("bad link", { status: 400 }); }
         if (!t.exp || t.exp < Math.floor(Date.now() / 1000)) return new Response("link expired — go back and click download again", { status: 410 });
         if (t.kind !== "ext") return new Response("bad link", { status: 400 });
-        const extObj = await getExtMovies(env);
+        const extObj = await getExtMovies(this.state.storage);
         const m = extObj[t.id];
         if (!m) return new Response("not found", { status: 404 });
         const srcs = (m.sources && m.sources.length) ? m.sources : [{ label: "Default", url: m.url }];
