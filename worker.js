@@ -573,15 +573,29 @@ function mergeDiscoveryState(s){
 async function getDiscoveryState(env){
   try { return mergeDiscoveryState(await env.DATA_KV.get("ext:discovery:state", "json")); } catch (e) { return defaultDiscoveryState(); }
 }
-// Strict reads — recovery only. Unlike getPending/getSeen/
-// getDiscoveryState (which swallow KV errors and return fallbacks),
-// these throw, so reconcileDiscoveryState can abort without writing
-// anything when a read fails. A fallback {} or defaults must never be
-// treated as genuine data by recovery: saving them would erase the
-// real seen-map or reset the real discovery configuration.
-async function getPendingStrict(env){ return await env.DATA_KV.get("ext:pending", "json") || {}; }
-async function getSeenStrict(env){ return await env.DATA_KV.get("ext:discovery:seen", "json") || {}; }
-async function getDiscoveryStateStrict(env){ return mergeDiscoveryState(await env.DATA_KV.get("ext:discovery:state", "json")); }
+// Strict reads — recovery and admin writes. Unlike getPending/getSeen/
+// getDiscoveryState/getExtMovies (which swallow KV errors and return
+// fallbacks), these throw, so a failed read aborts instead of writing
+// a fallback over real data. A fallback {} or defaults must never be
+// treated as genuine data: saving it would erase the real seen-map,
+// reset the real discovery configuration, or wipe the live catalogue
+// / approval queue (G1, 2026-11-13).
+async function getPendingStrict(env){
+  try { return await env.DATA_KV.get("ext:pending", "json") || {}; }
+  catch (e) { e.code = "KV_READ_FAILED"; throw e; }
+}
+async function getSeenStrict(env){
+  try { return await env.DATA_KV.get("ext:discovery:seen", "json") || {}; }
+  catch (e) { e.code = "KV_READ_FAILED"; throw e; }
+}
+async function getExtMoviesStrict(env){
+  try { return await env.DATA_KV.get("ext:movies", "json") || {}; }
+  catch (e) { e.code = "KV_READ_FAILED"; throw e; }
+}
+async function getDiscoveryStateStrict(env){
+  try { return mergeDiscoveryState(await env.DATA_KV.get("ext:discovery:state", "json")); }
+  catch (e) { e.code = "KV_READ_FAILED"; throw e; }
+}
 async function saveDiscoveryState(env, obj){
   await env.DATA_KV.put("ext:discovery:state", JSON.stringify(obj));
 }
@@ -1913,7 +1927,7 @@ export class TunnelDO {
   }
 
   // Shared catalog listing used by /api/movies and /sitemap.xml (live data only).
-  async listMovies(env) {
+  async listMovies(env, opts = {}) {
     const br = await this.s3fetch("GET", "/");
     let movies = [];
     if (br.status < 400) {
@@ -1945,12 +1959,12 @@ export class TunnelDO {
     }
     // External movies (linked, not hosted) - from KV (survives deploys)
     try {
-      const extObj = await getExtMovies(env);
+      const extObj = opts.strictExt ? await getExtMoviesStrict(env) : await getExtMovies(env);
       // unlisted entries stay reachable via their direct /view/ext/<id>
       // URL (used to verify embed players) but are kept out of the home
       // catalog and the app feed until explicitly published.
       for (const id in extObj) { if (extObj[id].unlisted) continue; movies.push({ ...extObj[id], external: true }); }
-    } catch (e) {}
+    } catch (e) { if (opts.strictExt) throw e; }
     return movies;
   }
 
@@ -2049,8 +2063,13 @@ export class TunnelDO {
         lists.push({ via: "tmdb-trending", type: "tv", path: "/trending/tv/week?page=1" });
       }
       if (state.sources.upcoming) lists.push({ via: "tmdb-upcoming", type: "movie", path: "/movie/upcoming?page=1" });
-      const seen = await getSeen(env);
-      const pend = await getPending(env);
+      // Strict reads (G2): the swallowing getSeen()/getPending() return {}
+      // on a KV read failure, and the run would then spend its detail
+      // budget on already-seen titles and report "ok" with 0 filed. A
+      // failed read must fail the run through the existing failure-
+      // recording path instead of continuing with blind dedupe state.
+      const seen = await getSeenStrict(env);
+      const pend = await getPendingStrict(env);
       const liveList = await this.listMovies(env);
       const wanted = new Map();
       for (const L of lists) {
@@ -2624,13 +2643,18 @@ export class TunnelDO {
           const d = await tmdbGet("/" + (type || "movie") + "/" + tmdb_id, apiKey);
           if (d) meta = { title: d.title || d.name, year: (d.release_date || d.first_air_date || "").slice(0, 4), overview: d.overview, poster: d.poster_path, backdrop: d.backdrop_path, vote: d.vote_average?.toFixed(1), genres: (d.genres || []).map(x => x.name), type: type || "movie", tmdb: tmdb_id };
         }
-        return this._withAdminLock(async () => {
+        try {
+          return await this._withAdminLock(async () => {
           const id = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
-          const extObj = await getExtMovies(env);
+          const extObj = await getExtMoviesStrict(env);
           extObj[id] = { id, url: video_url, sources: srcList, ...meta };
           await saveExtMovies(env, extObj);
           return json({ ok: true, id, title: meta.title });
-        });
+          });
+        } catch (e) {
+          if (e && e.code === "KV_READ_FAILED") return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          return json({ error: "operation failed — try again" }, 500);
+        }
       }
       // Admin: set poster on an external entry
       if (path === "/api/admin/extposter" && request.method === "POST") {
@@ -2684,12 +2708,17 @@ export class TunnelDO {
       if (path === "/api/admin/external" && request.method === "DELETE") {
         if (!(await checkPw(url, env, this.state))) return json({ error: "wrong password" }, 403);
         const id = url.searchParams.get("id");
-        return this._withAdminLock(async () => {
-          const extObj = await getExtMovies(env);
+        try {
+          return await this._withAdminLock(async () => {
+          const extObj = await getExtMoviesStrict(env);
           delete extObj[id];
           await saveExtMovies(env, extObj);
           return json({ ok: true });
-        });
+          });
+        } catch (e) {
+          if (e && e.code === "KV_READ_FAILED") return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          return json({ error: "operation failed — try again" }, 500);
+        }
       }
       // ---- Approval queue (Phase 1) ----
       // List pending + rejected candidates (admin only; nothing here is
@@ -2721,14 +2750,19 @@ export class TunnelDO {
           if (d) meta = { year: (d.release_date || d.first_air_date || "").slice(0, 4) || meta.year, overview: d.overview || meta.overview, poster: d.poster_path || meta.poster, backdrop: d.backdrop_path || meta.backdrop, vote: d.vote_average != null ? d.vote_average.toFixed(1) : meta.vote, genres: (d.genres || []).map(x => x.name) };
         }
         const cand = { id: "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title, type, tmdb, sources: srcList, discoveredVia: (body.discoveredVia || "manual").toString().slice(0, 40), note: (body.note || "").toString().slice(0, 500), status: "pending", createdAt: Date.now(), ...meta };
-        return this._withAdminLock(async () => {
-          const dup = findDuplicate(cand, await this.listMovies(env), await getPending(env), null);
+        try {
+          return await this._withAdminLock(async () => {
+          const dup = findDuplicate(cand, await this.listMovies(env, { strictExt: true }), await getPendingStrict(env), null);
           if (dup && !body.force) return json({ error: "duplicate", duplicate: dup }, 409);
-          const pend = await getPending(env);
+          const pend = await getPendingStrict(env);
           pend[cand.id] = cand;
           await savePending(env, pend);
           return json({ ok: true, id: cand.id, title: cand.title, duplicate: dup || null });
-        });
+          });
+        } catch (e) {
+          if (e && e.code === "KV_READ_FAILED") return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          return json({ error: "operation failed — try again" }, 500);
+        }
       }
       // Approve a candidate: publish it into the live catalogue through
       // the existing ext-entry shape (same fields /api/admin/external
@@ -2743,11 +2777,12 @@ export class TunnelDO {
         let body = {};
         try { body = await request.json(); } catch (e) {}
         const id = (body.id || "").toString();
-        return this._withAdminLock(async () => {
-          const pend = await getPending(env);
+        try {
+          return await this._withAdminLock(async () => {
+          const pend = await getPendingStrict(env);
           const cand = pend[id];
           if (!cand) {
-            const extObj0 = await getExtMovies(env);
+            const extObj0 = await getExtMoviesStrict(env);
             for (const k in extObj0) if (extObj0[k].pendingId === id) return json({ ok: true, id: k, title: extObj0[k].title, already: true });
             return json({ error: "not found" }, 404);
           }
@@ -2757,7 +2792,7 @@ export class TunnelDO {
           // published (same TMDB/title) — detect it first, drop the stale
           // queue entry, and report the existing live entry instead of
           // duplicating it.
-          const extObjPre = await getExtMovies(env);
+          const extObjPre = await getExtMoviesStrict(env);
           for (const k in extObjPre) if (extObjPre[k].pendingId === id) {
             delete pend[id];
             let cleanupOk = true;
@@ -2770,10 +2805,10 @@ export class TunnelDO {
           if (!cand.sources || !cand.sources.length) return json({ error: "need at least one playback source to approve" }, 400);
           const cleanSources = cand.sources.map(s => ({ label: s.label, url: cleanSrcUrl(s.url) })).filter(s => s.url);
           if (!cleanSources.length) return json({ error: "playback source URL invalid" }, 400);
-          const dup = findDuplicate(cand, await this.listMovies(env), pend, id);
+          const dup = findDuplicate(cand, await this.listMovies(env, { strictExt: true }), pend, id);
           if (dup && !body.force) return json({ error: "duplicate", duplicate: dup }, 409);
           const liveId = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
-          const extObj = await getExtMovies(env);
+          const extObj = await getExtMoviesStrict(env);
           extObj[liveId] = { id: liveId, pendingId: id, url: cleanSources[0].url, sources: cleanSources, title: cand.title, year: cand.year || null, overview: cand.overview || null, poster: cleanImgUrl(cand.poster), backdrop: cleanImgUrl(cand.backdrop), vote: cand.vote || null, genres: cand.genres || [], type: cand.type || "movie", tmdb: cand.tmdb || null };
           await saveExtMovies(env, extObj);
           delete pend[id];
@@ -2782,7 +2817,11 @@ export class TunnelDO {
           await markSeen(env, cand, "approved");
           await bumpDiscoveryTotal(env, "approved");
           return json({ ok: true, id: liveId, title: cand.title, ...(cleanupOk ? {} : { pendingCleanup: "failed" }) });
-        });
+          });
+        } catch (e) {
+          if (e && e.code === "KV_READ_FAILED") return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          return json({ error: "operation failed — try again" }, 500);
+        }
       }
       // Reject a candidate: stays in the queue under "rejected", never
       // appears publicly. Rejected entries can be approved no more —
@@ -2913,7 +2952,8 @@ export class TunnelDO {
             return json({ ok: true, state: cur });
           });
         } catch (e) {
-          return json({ error: "discovery state unreadable: " + String((e && e.message) || e) }, 500);
+          if (e && e.code === "KV_READ_FAILED") return json({ error: "stored data temporarily unreadable — try again" }, 500);
+          return json({ error: "operation failed — try again" }, 500);
         }
       }
       // Admin: change password (stored in DO storage, survives deploys)

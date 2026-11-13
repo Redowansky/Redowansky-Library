@@ -4,7 +4,13 @@
 // writes, retries, strict-read aborts, reconciler failure signaling),
 // and the discovery config race (R11–R15: finish() merging onto fresh
 // state, config-endpoint lock, failed-run preservation, strict
-// bookkeeping reads).
+// bookkeeping reads), the G1+G2 strict-read remediation (R25–R29:
+// failed reads in the four wipe-capable admin write paths abort with
+// HTTP 500 and leave KV byte-identical; a failed dedupe-phase read fails
+// the discovery run instead of running blind), and the dup-check
+// correction (R30–R32: strict catalogue reads in the two duplicate
+// checks, exercised through the real listMovies(); approve initial queue
+// read strict; generic catch messages with no KV internals).
 // Run: node --test .phase2a-test/test_pending_sources.mjs (from ~/workspace/sia-lab)
 // worker.mjs is regenerated from worker.js (see test_phase2a.mjs header).
 import test from "node:test";
@@ -19,7 +25,7 @@ function makeKV(initial = {}) {
     _map: m,
   };
 }
-function makeDO({ kv, tmdbKey = "FAKEKEY", live = null, slowKey = false } = {}) {
+function makeDO({ kv, tmdbKey = "FAKEKEY", live = null, slowKey = false, realList = false } = {}) {
   const env = { DATA_KV: kv, TMDB_KEY: undefined, DISCOVERY_CRON_SECRET: "cronsecret", S3_ACCESS_KEY: "x", S3_SECRET_KEY: "y" };
   const state = { storage: {
     get: async (k) => {
@@ -29,7 +35,10 @@ function makeDO({ kv, tmdbKey = "FAKEKEY", live = null, slowKey = false } = {}) 
     put: async () => {},
   } };
   const d = new TunnelDO(state, env);
-  d.listMovies = async () => live || [{ id: "emv", title: "Iron Man", tmdb: 1726, year: "2008", type: "movie" }];
+  // realList: keep the production listMovies() (bucket listing via a stubbed
+  // s3fetch + ext entries via the real KV read) — the `live` fixture would
+  // bypass the catalogue-read path under test (R30–R32).
+  if (!realList) d.listMovies = async () => live || [{ id: "emv", title: "Iron Man", tmdb: 1726, year: "2008", type: "movie" }];
   return d;
 }
 async function kvObj(kv, key) { return JSON.parse(kv._map.get(key) || "{}"); }
@@ -795,4 +804,207 @@ test("R15 approve with failing bookkeeping reads: approve succeeds, seen/config 
   assert.equal(st.frequency, "daily");
   assert.equal(st.totals.discovered, 45);
   assert.equal(st.totals.approved, 0, "totals bump skipped (best-effort), not applied on a stale snapshot");
+});
+
+// G1+G2 strict-read remediation (audit addendum, 2026-11-13):
+// R25–R28 — a failed KV read in the four wipe-capable admin write paths
+// must abort with HTTP 500 and leave the stored contents byte-identical.
+// R29 — a failed dedupe-phase read must fail the discovery run through the
+// existing failure-recording path, with nothing filed.
+function seedLive11() {
+  const o = {};
+  for (let i = 1; i <= 11; i++) o["emv" + i] = { id: "emv" + i, title: "Live Movie " + i, type: "movie", tmdb: 1000 + i, year: "2020", url: "https://example.com/" + i };
+  return o;
+}
+function liveListOf(live11) { return Object.values(live11).map((e) => ({ id: e.id, title: e.title, tmdb: e.tmdb, year: e.year, type: e.type })); }
+
+test("R25 approve with failing ext:movies read: 500, catalogue byte-identical", async () => {
+  const live11 = seedLive11();
+  const kv = makeFailingKV({
+    "ext:movies": live11,
+    "ext:pending": { "p-1": { id: "p-1", title: "New Film", type: "movie", tmdb: 2001, year: "2026", sources: [{ label: "S1", url: "https://example.com/play/2001" }], status: "pending", createdAt: 1 } },
+    "ext:discovery:seen": {},
+    "ext:discovery:state": {},
+  }, null, (k, n) => k === "ext:movies" && n === 2); // publish-step read (self-heal scan is #1)
+  const d = makeDO({ kv, live: liveListOf(live11) });
+  const beforeMovies = kv._map.get("ext:movies");
+  const beforePend = kv._map.get("ext:pending");
+  const r = await call(d, "/api/admin/pending/approve", { id: "p-1" });
+  assert.equal(r.status, 500, "a failed catalogue read must abort the approve, not publish");
+  assert.equal(r.body.error, "stored data temporarily unreadable — try again", "read failure gets the generic message");
+  assert.ok(!String(r.body.error || "").includes("kv get boom"), "raw KV error text is not exposed to clients");
+  assert.equal(kv._map.get("ext:movies"), beforeMovies, "catalogue byte-identical — no wipe to 1 entry");
+  assert.equal(kv._map.get("ext:pending"), beforePend, "queue byte-identical — candidate not deleted");
+  assert.equal(Object.keys(await kvObj(kv, "ext:movies")).length, 11);
+});
+
+test("R26 pending add with failing ext:pending read: 500, queue byte-identical", async () => {
+  const seed = {};
+  for (let i = 1; i <= 45; i++) seed["p-" + i] = { id: "p-" + i, title: "Queued " + i, type: "movie", tmdb: 3000 + i, status: "pending", createdAt: i };
+  const live11 = seedLive11();
+  const kv = makeFailingKV({ "ext:movies": live11, "ext:pending": seed }, null, (k, n) => k === "ext:pending" && n === 2); // save-step read (dup check is #1)
+  const d = makeDO({ kv, live: liveListOf(live11) });
+  const beforePend = kv._map.get("ext:pending");
+  const r = await call(d, "/api/admin/pending", { title: "Brand New", type: "movie" });
+  assert.equal(r.status, 500, "a failed queue read must abort the add, not save a fallback");
+  assert.equal(r.body.error, "stored data temporarily unreadable — try again", "read failure gets the generic message");
+  assert.ok(!String(r.body.error || "").includes("kv get boom"), "raw KV error text is not exposed to clients");
+  assert.equal(kv._map.get("ext:pending"), beforePend, "queue byte-identical — no wipe to 1 candidate");
+  assert.equal(Object.keys(await kvObj(kv, "ext:pending")).length, 45);
+});
+
+test("R27 DELETE external with failing ext:movies read: 500, catalogue byte-identical", async () => {
+  const live11 = seedLive11();
+  const kv = makeFailingKV({ "ext:movies": live11 }, null, (k, n) => k === "ext:movies" && n === 1);
+  const d = makeDO({ kv });
+  const before = kv._map.get("ext:movies");
+  const res = await d.fetch(new Request("https://internal/api/admin/external?pw=pw123&id=emv3", { method: "DELETE" }));
+  assert.equal(res.status, 500, "a failed catalogue read must abort the delete, not save {}");
+  const body = await res.json().catch(() => ({}));
+  assert.equal(body.error, "stored data temporarily unreadable — try again", "read failure gets the generic message");
+  assert.ok(!String(body.error || "").includes("kv get boom"), "raw KV error text is not exposed to clients");
+  assert.equal(kv._map.get("ext:movies"), before, "catalogue byte-identical — no wipe to empty");
+  assert.equal(Object.keys(await kvObj(kv, "ext:movies")).length, 11);
+});
+
+test("R28 external POST with failing ext:movies read: 500, catalogue byte-identical", async () => {
+  const live11 = seedLive11();
+  const kv = makeFailingKV({ "ext:movies": live11 }, null, (k, n) => k === "ext:movies" && n === 1);
+  const d = makeDO({ kv });
+  const before = kv._map.get("ext:movies");
+  const r = await call(d, "/api/admin/external", { video_url: "https://example.com/v.mp4", title: "Direct Film", type: "movie" });
+  assert.equal(r.status, 500, "a failed catalogue read must abort the publish, not save a fallback");
+  assert.equal(r.body.error, "stored data temporarily unreadable — try again", "read failure gets the generic message");
+  assert.ok(!String(r.body.error || "").includes("kv get boom"), "raw KV error text is not exposed to clients");
+  assert.equal(kv._map.get("ext:movies"), before, "catalogue byte-identical — no wipe to 1 entry");
+  assert.equal(Object.keys(await kvObj(kv, "ext:movies")).length, 11);
+});
+
+test("R29 discovery dedupe-phase read fails: run recorded failed, nothing filed", async () => {
+  const base = {
+    "ext:pending": {},
+    "ext:discovery:seen": { "movie:1001": { type: "movie", tmdb: 1001, title: "Already Seen", firstSeen: "2026-11-12", lastSeen: "2026-11-12", status: "pending" } },
+    "ext:discovery:state": { enabled: true, frequency: "daily", sources: { tmdb: true, trending: true, upcoming: false, tvmaze: false }, budget: { maxNewPerRun: 15, maxDetailCalls: 30 }, lastRun: null, lastSuccess: null, totals: { discovered: 0, approved: 0, rejected: 0 }, nextRunAt: null },
+  };
+  const oneTitleFetch = async (url) => {
+    const u = String(url);
+    const ok = (obj) => ({ ok: true, status: 200, json: async () => obj });
+    if (u.includes("/discover/movie") || u.includes("/discover/tv") || u.includes("/trending/") || u.includes("/movie/upcoming")) return ok({ results: [{ id: 1001, popularity: 9 }] });
+    if (u.includes("/watch/providers")) return ok({ results: {} });
+    if (u.match(/\/movie\/1001\?/)) return ok({ id: 1001, title: "Already Seen", release_date: "2026-11-12", overview: "x", poster_path: "/p.jpg", backdrop_path: null, vote_average: 7, genres: [] });
+    return ok({});
+  };
+  globalThis.fetch = oneTitleFetch;
+  // Control: healthy reads -> the already-seen title is recognised, run ok, 0 filed.
+  const kvC = makeKV(JSON.parse(JSON.stringify(base)));
+  const dC = makeDO({ kv: kvC });
+  const runC = await dC.runDiscovery(dC.env, "manual");
+  assert.equal(runC.status, "ok", "control run must succeed with these seeds");
+  assert.equal(runC.counts.newCandidates, 0, "already-seen title is not re-filed");
+  assert.equal(Object.keys(await kvObj(kvC, "ext:pending")).length, 0);
+  // Failing dedupe-phase read only (2nd get on ext:discovery:seen: reconciler=1st, batch=3rd).
+  const kvF = makeFailingKV(JSON.parse(JSON.stringify(base)), null, (k, n) => k === "ext:discovery:seen" && n === 2);
+  const dF = makeDO({ kv: kvF });
+  const beforeSeen = kvF._map.get("ext:discovery:seen");
+  const beforePend = kvF._map.get("ext:pending");
+  const runF = await dF.runDiscovery(dF.env, "manual");
+  assert.equal(runF.status, "failed", "a run that cannot read dedupe state must fail, not run blind");
+  assert.ok(String(runF.error || "").includes("kv get boom"), "failure names the unreadable read");
+  assert.equal(runF.counts.newCandidates, 0, "nothing filed after a failed dedupe read");
+  assert.equal(kvF._map.get("ext:discovery:seen"), beforeSeen, "seen-map byte-identical");
+  assert.equal(kvF._map.get("ext:pending"), beforePend, "queue byte-identical — nothing filed");
+  const st = await stateOf(kvF);
+  assert.equal(st.lastRun.status, "failed", "failure recorded in lastRun");
+  assert.equal(st.lastSuccess, null, "no success recorded for a failed run");
+});
+
+// Dup-check correction (round 9 follow-up, 2026-11-13):
+// R30–R31 — the two duplicate checks now read the catalogue through the
+// real listMovies({ strictExt: true }). These tests exercise that path
+// (bucket listing via a stubbed s3fetch + ext entries via the real KV
+// read) — no `live:` fixture, which would bypass the read under test.
+// R32 — approve's initial queue read is now strict.
+function stubS3(d) {
+  d.s3fetch = async (method, path) => {
+    const enc = (s) => new TextEncoder().encode(s);
+    if (path === "/") return { status: 200, body: enc("<ListAllMyBucketsResult><Buckets><Bucket><Name>media</Name></Bucket></Buckets></ListAllMyBucketsResult>") };
+    if (path === "/media") return { status: 200, body: enc("<ListBucketResult><Contents><Key>movies/english/iron-man-2008-english.mp4</Key></Contents></ListBucketResult>") };
+    return { status: 404, body: enc("") };
+  };
+}
+const ironLive = { "emv-iron": { id: "emv-iron", title: "Iron Man", type: "movie", tmdb: 1726, year: "2008", url: "https://example.com/iron" } };
+
+test("R30 pending add, dup-check catalogue read fails: 500, nothing queued", async () => {
+  const kvBase = { "ext:movies": ironLive, "ext:pending": {} };
+  // Control: healthy reads -> the dup check sees the live ext entry (409).
+  const kvC = makeKV(JSON.parse(JSON.stringify(kvBase)));
+  const dC = makeDO({ kv: kvC, tmdbKey: null, realList: true });
+  stubS3(dC);
+  const rC = await call(dC, "/api/admin/pending", { title: "Iron Man", type: "movie", tmdb: 1726 });
+  assert.equal(rC.status, 409, "control: dup check must see the live ext entry via real listMovies");
+  assert.equal(rC.body.error, "duplicate");
+  assert.equal(Object.keys(await kvObj(kvC, "ext:pending")).length, 0, "control: duplicate not queued");
+  // Failing catalogue read during dup detection (1st ext:movies get).
+  const kvF = makeFailingKV(JSON.parse(JSON.stringify(kvBase)), null, (k, n) => k === "ext:movies" && n === 1);
+  const dF = makeDO({ kv: kvF, tmdbKey: null, realList: true });
+  stubS3(dF);
+  const beforePend = kvF._map.get("ext:pending");
+  const beforeMovies = kvF._map.get("ext:movies");
+  const rF = await call(dF, "/api/admin/pending", { title: "Iron Man", type: "movie", tmdb: 1726 });
+  assert.equal(rF.status, 500, "unreadable catalogue must abort the add, not queue a duplicate");
+  assert.equal(rF.body.error, "stored data temporarily unreadable — try again");
+  assert.ok(!String(rF.body.error || "").includes("kv get boom"), "no raw KV error text to clients");
+  assert.equal(kvF._map.get("ext:pending"), beforePend, "queue byte-identical");
+  assert.equal(kvF._map.get("ext:movies"), beforeMovies, "catalogue byte-identical");
+});
+
+test("R31 approve, dup-check catalogue read fails: 500, nothing published", async () => {
+  const cand = { id: "p-1", title: "Iron Man", type: "movie", tmdb: 1726, year: "2008", sources: [{ label: "S1", url: "https://example.com/play" }], status: "pending", createdAt: 1 };
+  const kvBase = { "ext:movies": ironLive, "ext:pending": { "p-1": cand }, "ext:discovery:seen": {}, "ext:discovery:state": {} };
+  // Control: healthy reads -> the dup check sees the live ext entry (409).
+  const kvC = makeKV(JSON.parse(JSON.stringify(kvBase)));
+  const dC = makeDO({ kv: kvC, realList: true });
+  stubS3(dC);
+  const rC = await call(dC, "/api/admin/pending/approve", { id: "p-1" });
+  assert.equal(rC.status, 409, "control: dup check must see the live ext entry via real listMovies");
+  assert.equal(rC.body.error, "duplicate");
+  assert.equal(Object.keys(await kvObj(kvC, "ext:movies")).length, 1, "control: duplicate not published");
+  assert.ok((await kvObj(kvC, "ext:pending"))["p-1"], "control: candidate still queued");
+  // Failing catalogue read during dup detection (2nd ext:movies get: self-heal scan is #1).
+  const kvF = makeFailingKV(JSON.parse(JSON.stringify(kvBase)), null, (k, n) => k === "ext:movies" && n === 2);
+  const dF = makeDO({ kv: kvF, realList: true });
+  stubS3(dF);
+  const beforePend = kvF._map.get("ext:pending");
+  const beforeMovies = kvF._map.get("ext:movies");
+  const rF = await call(dF, "/api/admin/pending/approve", { id: "p-1" });
+  assert.equal(rF.status, 500, "unreadable catalogue must abort the approve, not publish a duplicate");
+  assert.equal(rF.body.error, "stored data temporarily unreadable — try again");
+  assert.ok(!String(rF.body.error || "").includes("kv get boom"), "no raw KV error text to clients");
+  assert.equal(kvF._map.get("ext:pending"), beforePend, "queue byte-identical");
+  assert.equal(kvF._map.get("ext:movies"), beforeMovies, "catalogue byte-identical");
+});
+
+test("R32 approve with failing initial queue read: 500, nothing published", async () => {
+  const cand = { id: "p-1", title: "New Film", type: "movie", tmdb: 2001, year: "2026", sources: [{ label: "S1", url: "https://example.com/play/2001" }], status: "pending", createdAt: 1 };
+  const kvBase = { "ext:movies": seedLive11(), "ext:pending": { "p-1": cand }, "ext:discovery:seen": {}, "ext:discovery:state": {} };
+  // Control: healthy reads -> approve succeeds and publishes.
+  const kvC = makeKV(JSON.parse(JSON.stringify(kvBase)));
+  const dC = makeDO({ kv: kvC, realList: true });
+  stubS3(dC);
+  const rC = await call(dC, "/api/admin/pending/approve", { id: "p-1" });
+  assert.equal(rC.status, 200, "control: healthy approve must succeed");
+  assert.equal(Object.keys(await kvObj(kvC, "ext:movies")).length, 12, "control: entry published");
+  assert.equal((await kvObj(kvC, "ext:pending"))["p-1"], undefined, "control: candidate removed from queue");
+  // Failing initial queue read (1st ext:pending get).
+  const kvF = makeFailingKV(JSON.parse(JSON.stringify(kvBase)), null, (k, n) => k === "ext:pending" && n === 1);
+  const dF = makeDO({ kv: kvF, realList: true });
+  stubS3(dF);
+  const beforePend = kvF._map.get("ext:pending");
+  const beforeMovies = kvF._map.get("ext:movies");
+  const rF = await call(dF, "/api/admin/pending/approve", { id: "p-1" });
+  assert.equal(rF.status, 500, "unreadable queue must abort the approve, not 404");
+  assert.equal(rF.body.error, "stored data temporarily unreadable — try again");
+  assert.ok(!String(rF.body.error || "").includes("kv get boom"), "no raw KV error text to clients");
+  assert.equal(kvF._map.get("ext:pending"), beforePend, "queue byte-identical");
+  assert.equal(kvF._map.get("ext:movies"), beforeMovies, "catalogue byte-identical");
 });
