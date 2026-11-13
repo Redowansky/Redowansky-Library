@@ -64,6 +64,7 @@ for (const [freq, days] of [["daily", 1], ["every2days", 2], ["weekly", 7]]) {
   const st = await kvObj(kv, "ext:discovery:state");
   const gap = (Date.parse(st.nextRunAt) - Date.parse(run.at)) / dayMs;
   console.log(`  ${freq}: status=${run.status} nextRunAt-runAt = ${gap} day(s) (expect ${days})`);
+  assert.equal(run.status, "ok");
   assert.equal(gap, days);
 }
 
@@ -84,6 +85,8 @@ console.log("--- 2. failed run preserves totals + seen + queue ---");
   console.log(`  lastRun now: status=${st.lastRun.status} (previous 'ok' record replaced: ${st.lastRun.status !== "ok"})`);
   console.log(`  totals.discovered still ${st.totals.discovered} (was 15); queue still ${Object.keys(pend).length} entry; seen still ${Object.keys(seen).length} entry`);
   assert.equal(run.status, "failed");
+  assert.equal(st.lastRun.status, "failed", "failure record replaces the previous ok record");
+  assert.equal(st.lastSuccess, null, "no successful run yet, so no lastSuccess to preserve");
   assert.equal(st.totals.discovered, 15);
   assert.deepEqual(Object.keys(pend), ["p-old"]);
   assert.deepEqual(Object.keys(seen), ["movie:555"]);
@@ -112,5 +115,16 @@ console.log("--- 4. two CONCURRENT runs on one DO (overlap race) ---");
   console.log(`  run1=${r1.status} run2=${r2.status} (one should be 'skipped' if the guard held)`);
   console.log(`  queue entries=${Object.keys(pend).length} (3 expected if guard held)`);
   console.log(`  double-filed tmdb ids: ${dupes.length ? dupes.join(",") : "none"}`);
+  // Real assertions — console output alone is not proof. Expected:
+  // exactly one run does the work ("ok"), the other is turned away
+  // by the overlap guard ("skipped"); the three new titles file
+  // exactly once each; totals count exactly those three.
+  assert.deepEqual([r1.status, r2.status].sort(), ["ok", "skipped"], "one run works, the other is skipped by the overlap guard");
+  assert.equal(Object.keys(pend).length, 3, "exactly three candidates filed");
+  assert.deepEqual(tmdbIds, [1001, 1002, 2001], "the three new titles, no others");
+  assert.deepEqual(dupes, [], "no title filed twice");
+  const st = await kvObj(kv, "ext:discovery:state");
+  assert.equal(st.totals.discovered, 3, "totals count exactly the filed candidates");
+  assert.equal(st.lastRun.status, "ok", "the skipped run must not overwrite the working run's record");
 }
 console.log("DONE");

@@ -1,5 +1,7 @@
 // Tests for the Phase 2a hardening: editable pending sources (T1–T11),
-// lastSuccess recording, and the overlap-guard fix.
+// flag-cleanup regression tests, lastSuccess recording, overlap guard,
+// and partial-write recovery (R1–R3b, R5–R9: failed reads, failed
+// writes, retries, strict-read aborts).
 // Run: node --test .phase2a-test/test_pending_sources.mjs (from ~/workspace/sia-lab)
 // worker.mjs is regenerated from worker.js (see test_phase2a.mjs header).
 import test from "node:test";
@@ -510,6 +512,10 @@ test("R7 seen read fails: recovery writes nothing, existing entries survive", as
   assert.equal(seen["movie:1001"].status, "approved");
   assert.equal(seen["movie:1002"].status, "live-dup");
   assert.equal(seen["movie:1003"], undefined, "no heal entry written after a failed read");
+  const pend = await kvObj(kv, "ext:pending");
+  assert.deepEqual(Object.keys(pend), ["p-new1"], "queue untouched — the failed batch wrote nothing");
+  assert.equal(pend["p-new1"].tmdb, 1003);
+  assert.equal(pend["p-new1"].status, "pending");
   const st = await stateOf(kv);
   assert.equal(st.totals.discovered, 0, "totals untouched");
   assert.equal(st.lastRun.status, "failed", "the failed run itself is recorded");
@@ -538,6 +544,9 @@ test("R8 state read fails: config and history survive, recovery writes nothing",
   assert.ok(String(run.error || "").includes("discovery state unreadable"), "failure names the unreadable state");
   const seen = await kvObj(kv, "ext:discovery:seen");
   assert.equal(Object.keys(seen).length, 0, "no heal write before the failed read");
+  const pend = await kvObj(kv, "ext:pending");
+  assert.deepEqual(Object.keys(pend), ["p-new1"], "queue untouched — the aborted run wrote nothing");
+  assert.equal(pend["p-new1"].tmdb, 1003);
   const st = await stateOf(kv);
   assert.equal(st.enabled, true);
   assert.equal(st.frequency, "weekly");
