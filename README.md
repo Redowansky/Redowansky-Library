@@ -25,7 +25,8 @@
 - 🔒 **Signed streams** — video bytes only flow through `/stream/<key>?t=<token>` (24h HMAC tokens minted by a current app/site session). Public R2 URLs are off, so old app builds can't play anything at all
 - 🚫 **Server-side version gate** — the app is refused with 426 below the minimum version, while the update path (`/apk`, `version.json`) always stays open
 - 👤 **Sign-in + sync** — Google and Amazon sign-in (`/auth/*`), cross-device watch progress (`/api/progress`), Ask for a Movie (`/api/request` → emailed to the developer)
-- 🛠️ **Admin panel (`/admin`)** — resumable chunked R2 uploader to `incoming/`, TMDB matching, external entries, stats, and a Users Online Now counter (presence heartbeat)
+- 🛠️ **Admin panel (`/admin`)** — Dashboard (stats + Users Online Now counter), **Approval Queue** (pending/rejected candidates: inspect, approve, reject, delete — and attach/edit playback sources per candidate), **Discovery** (enable, frequency, budget, sources, Run now, last-run card), Settings. The old Movies &amp; Songs section (R2 uploader, TMDB key input, external-entry forms) was removed 2026-11-13 — those server routes still exist but have no UI
+- 🔭 **Automated discovery (Phase 2a, "Redowansky 2.0")** — TMDB new releases + trending + upcoming, daily cron 02:00 UTC (15 new candidates max per run, popularity-first), filed into the Approval Queue as metadata-only candidates. **Approval-first: nothing ever publishes without an admin approving it**, and approval requires at least one playback source. Candidates live in KV `ext:pending`; the live catalogue (`ext:movies`) is untouched until approval
 - ⬇️ **Download gate** — `/gate` with Turnstile + HMAC-signed `/go/` links (5 min expiry), a full download page, and a signed `/px/` proxy that forces attachment downloads for external files
 - 📢 **Ads** — Mondiad (gate banner, player push, interstitial) + Adsterra (Social Bar, popunder). The site-wide AdBlock wall is in the code but currently **disabled** via flag (Nov 12, 2026 — flip `ADBLOCK_WALL_ENABLED` to re-enable)
 - 🔍 **SEO + policy** — `/sitemap.xml`, `robots.txt`, `/privacy`, `/app-ads.txt`, `/apk` redirect to the latest APK
@@ -52,6 +53,12 @@ No wrangler, no server — Cloudflare free tier only.
 | File | What it is |
 | --- | --- |
 | `worker.js` | The whole Worker: pages, API, admin, gate, streaming, ads |
+| `build_phase2a.py` | Build script: Phase 2a automated discovery engine |
+| `build_hardening.py` | Build script: Phase 2a hardening (editable sources, discovery recording, cron fixes) |
+| `check_phase2a.js` | Template + admin-JS checks (evaluates the admin page script, functional DOM tests) |
+| `.phase2a-test/` | Unit tests: `test_phase2a.mjs` (discovery engine), `test_pending_sources.mjs` (sources editor), `verify_cron_checks.mjs` (frequency / failure / secret / overlap) |
+| `set_discovery_secret.py` | Generates + sets the `DISCOVERY_CRON_SECRET` Worker secret (random, never printed) |
+| `PHASE1_REPORT.md` | Phase 1 (Approval Queue) verification report |
 | `deploy_worker.py` | Deploys `worker.js` with its DO/KV/R2 bindings via the Cloudflare API |
 | `deploy_pages.py` | Deploys static files to Cloudflare Pages (direct-upload REST API) |
 | `apply_0627_gate.py` | One-off patch script: v0.6.27 app version gate |
@@ -68,7 +75,7 @@ No wrangler, no server — Cloudflare free tier only.
 > The Durable Object name is **frozen at `main-v35`** (see the comment in `worker.js`). **Never rename it.** Every unique DO name creates a fresh, empty database — renaming wipes all stored settings on every deploy. This was the root cause of the *"everything resets on update"* saga.
 
 > [!NOTE]
-> Secrets live as Cloudflare Worker secrets — **never in this repo**: `ADMIN_PW`, `TMDB_KEY`, `PLAY_TOKEN_SECRET`, `GOOGLE_CLIENT_SECRET`, `AMAZON_CLIENT_SECRET`, `UPLOAD_KEY`. (The Google OAuth client ID in `worker.js` is public by design — it travels in authorize URLs.)
+> Secrets live as Cloudflare Worker secrets — **never in this repo**: `ADMIN_PW`, `TMDB_KEY`, `PLAY_TOKEN_SECRET`, `GOOGLE_CLIENT_SECRET`, `AMAZON_CLIENT_SECRET`, `UPLOAD_KEY`, `DISCOVERY_CRON_SECRET`. (The Google OAuth client ID in `worker.js` is public by design — it travels in authorize URLs.)
 >
 > Admin uploads go through the chunked/resumable R2 endpoints — never a single big request (Cloudflare caps a single Worker request at 100 MB).
 >
