@@ -140,5 +140,12 @@ if (!pl.includes("BD: Netflix, Prime Video") || !pl.includes("US: Hulu")) throw 
   if (!html.includes("needs a playback source")) throw new Error("needsSource marker missing in renderPend");
   if (!html.includes("Where to watch:") || !html.includes("BD: Netflix")) throw new Error("providers line missing in renderPend");
   if (!html.includes("discovered ")) throw new Error("discoveredAt missing in renderPend");
+  if (!html.includes("Playback sources") || !html.includes("savePendSources")) throw new Error("sources editor missing in renderPend");
+  if (!html.includes("disabled") || !html.includes("Add a playback source first")) throw new Error("Approve not disabled for sourceless candidate");
+  // same candidate with a source attached: editor pre-filled, Approve enabled
+  vm.runInContext("pendCache.pending[0].sources=[{label:'Main',url:'https://example.com/f.mp4'}];pendCache.pending[0].needsSource=false;renderPend()", sandbox);
+  const html2 = els["pendList"].innerHTML;
+  if (!html2.includes("https://example.com/f.mp4")) throw new Error("saved source not shown in editor");
+  if (html2.includes("disabled")) throw new Error("Approve wrongly disabled for sourced candidate");
   console.log("ALL TEMPLATE + ADMIN-JS CHECKS PASSED");
 })().catch((e) => { console.error("FAIL:", e.message); process.exit(1); });

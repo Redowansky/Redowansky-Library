@@ -63,7 +63,7 @@ test("manual run files only the genuinely new titles", async () => {
   const d = makeDO({ kv });
   const run = await d.runDiscovery(d.env, "manual");
   assert.equal(run.status, "ok");
-  assert.deepEqual(run.counts, { fetched: 8, newCandidates: 3, duplicates: 3, skipped: 0, failed: 0 });
+  assert.deepEqual(run.counts, { fetched: 8, newCandidates: 3, duplicates: 3, skipped: 0, failed: 0, bySource: { "tmdb-discover": 3, "tmdb-trending": 5 } });
   const pend = await kvObj(kv, "ext:pending");
   const fresh = Object.values(pend).filter((c) => c.id !== "p-rej");
   assert.equal(fresh.length, 3);
