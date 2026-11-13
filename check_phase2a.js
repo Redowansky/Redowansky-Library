@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Phase 2a verification harness (kept under ~/workspace/sia-lab/, NOT the repo):
+// Phase 2a verification harness (tracked in the repo; run by CI too):
 //  1. Extracts the ADMIN_PAGE + PAGE template literals from worker.js,
 //     evaluates them (interpolations blanked), extracts <script> blocks and
 //     node --check's each — node --check worker.js alone does NOT cover

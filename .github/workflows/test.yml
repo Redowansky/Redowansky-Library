@@ -1,0 +1,45 @@
+# Phase 2a tests — runs on every push to main so anyone reviewing the
+# repo (including ChatGPT) can verify the suite from the green check
+# alone, without trusting a reported test count.
+#
+# What it runs:
+#   1. node --check worker.js (syntax; does NOT cover JS inside the
+#      ADMIN_PAGE template literal — check_phase2a.js does that)
+#   2. node --test on the two unit suites (30 tests: 9 Phase 2a +
+#      21 hardening, incl. the partial-write R-tests)
+#   3. check_phase2a.js — template extraction + admin-JS functional
+#      checks (sources editor, failed-run vs last-success card)
+#   4. verify_cron_checks.mjs — frequency mapping, disabled no-op,
+#      secret fail-closed, failed-run preservation, overlap guard
+#
+# worker.mjs is NOT committed: it is generated here from worker.js by
+# stubbing the Cloudflare-only EmailMessage (line 1) — same command
+# used locally. All tests use stub KV/fetch; nothing touches
+# Cloudflare, and no secrets are needed.
+
+name: Phase 2a tests
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Syntax-check worker.js
+        run: node --check worker.js
+      - name: Generate worker.mjs test stub
+        working-directory: .phase2a-test
+        run: sed '1s/.*/\/\/ test stub: EmailMessage is cloudflare-only\nclass EmailMessage { constructor(from, to, body) { this.from = from; this.to = to; this.body = body; } }/' ../worker.js > worker.mjs
+      - name: Unit tests (Phase 2a + hardening)
+        working-directory: .phase2a-test
+        run: node --test test_phase2a.mjs test_pending_sources.mjs
+      - name: Template + admin-JS checks
+        run: node check_phase2a.js
+      - name: Cron verification checks
+        run: node .phase2a-test/verify_cron_checks.mjs
